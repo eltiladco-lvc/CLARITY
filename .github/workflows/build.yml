@@ -1,0 +1,55 @@
+name: Build CLARITY VST3 (Windows)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar tipografias libres (solo si faltan)
+        shell: bash
+        run: |
+          mkdir -p Resources/fonts
+          [ -f Resources/fonts/GreatVibes.ttf ] || curl -fsSL -o Resources/fonts/GreatVibes.ttf \
+            https://raw.githubusercontent.com/google/fonts/main/ofl/greatvibes/GreatVibes-Regular.ttf || true
+          if [ ! -f Resources/fonts/Hoshiko.ttf ] && [ ! -f Resources/fonts/YujiBoku.ttf ]; then
+            curl -fsSL -o Resources/fonts/YujiBoku.ttf \
+              https://raw.githubusercontent.com/google/fonts/main/ofl/yujiboku/YujiBoku-Regular.ttf || true
+          fi
+          find Resources/fonts -name "*.ttf" -size 0 -delete
+          ls -la Resources/fonts
+
+      - name: Configurar
+        run: cmake -B build -A x64
+
+      - name: Compilar (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Empaquetar
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse build/CLARITY_artefacts | Select-Object -First 40 FullName
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse build/CLARITY_artefacts/Release/VST3/CLARITY.vst3 dist/
+          Compress-Archive -Path dist/CLARITY.vst3 -DestinationPath CLARITY-VST3-win64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CLARITY-VST3-win64
+          path: CLARITY-VST3-win64.zip
+
+      - name: Publicar Release (solo con tag vX.Y.Z)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CLARITY-VST3-win64.zip
