@@ -7,7 +7,6 @@ namespace
 {
     constexpr float kPi = juce::MathConstants<float>::pi;
 
-    // align: 0 izquierda, 1 centro, 2 derecha (por línea base)
     void drawTxt (juce::Graphics& g, const juce::Font& f, const juce::String& t, float x, float baseline, int align)
     {
         juce::GlyphArrangement m;
@@ -19,13 +18,13 @@ namespace
         ga.draw (g);
     }
 
-    // lin: 1.0 = 0 VU, tope +3 VU (1.4125)
-    float vuAngle (float lin)
+    float vuAngleDb (float dbTp)
     {
-        const float p = juce::jlimit (0.0f, 1.05f, lin / 1.4125f);
+        const float p = juce::jlimit (0.0f, 1.0f, (dbTp + 20.0f) / 23.0f);
         return juce::degreesToRadians (-44.0f + 88.0f * p);
     }
-    float tickAngle (float db) { return vuAngle (std::pow (10.0f, db / 20.0f)); }
+
+    float tickAngle (float db) { return vuAngleDb (db); }
 
     juce::Point<float> pol (float px, float py, float a, float r)
     {
@@ -33,6 +32,34 @@ namespace
     }
 
     juce::Rectangle<float> tabRect (int i) { return { 227.0f + (float) i * 78.0f, 8.0f, 70.0f, 18.0f }; }
+
+    float amplitudeToDbTp (float amplitude)
+    {
+        return amplitude > 1.0e-9f ? 20.0f * std::log10 (amplitude) : -180.0f;
+    }
+
+    template <typename SampleAt>
+    float truePeak (int n, SampleAt&& sampleAt)
+    {
+        if (n <= 0) return 0.0f;
+        float peak = 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            const float value = sampleAt (i);
+            peak = juce::jmax (peak, std::abs (value));
+
+            const float next = (i + 1 < n) ? sampleAt (i + 1) : value;
+            const float span = std::abs (next - value);
+            if (span > 1.0e-6f)
+            {
+                const float midpoint = 0.5f * (value + next);
+                const float slope = next - value;
+                const float peakBetween = std::abs (midpoint + 0.25f * slope);
+                peak = juce::jmax (peak, peakBetween);
+            }
+        }
+        return peak;
+    }
 }
 
 StereoPanel::StereoPanel()
@@ -47,8 +74,9 @@ StereoPanel::StereoPanel()
 
 void StereoPanel::process (const float* l, const float* r, int n)
 {
-    if (n <= 0) return;
-    double sl = 0, sr = 0, sm = 0, ss = 0, lr = 0;
+    if (n <= 0 || l == nullptr || r == nullptr) return;
+
+    double sl = 0, sr = 0, lr = 0;
     float pk = 0.0f;
     std::array<float, kPolarBins> acc {};
 
@@ -59,28 +87,31 @@ void StereoPanel::process (const float* l, const float* r, int n)
     {
         const float a = l[i], b = r[i];
         const float m = 0.5f * (a + b), s = 0.5f * (a - b);
-        sl += (double) a * a;  sr += (double) b * b;
-        sm += (double) m * m;  ss += (double) s * s;
-        lr += (double) a * b;
+        sl += (double) a * a; sr += (double) b * b; lr += (double) a * b;
         pk = juce::jmax (pk, std::abs (a), std::abs (b));
 
-        // Polar: ángulo de paneo (0 = izquierda, centro = vertical, derecha = 180)
         const int bin = juce::jmin (kPolarBins - 1,
                                     (int) std::floor (std::atan2 (std::abs (b), std::abs (a)) * 2.0f / kPi * (float) kPolarBins));
         acc[(size_t) bin] += 0.5f * (a * a + b * b);
 
-        // Scope: X = (R-L)/2, Y = (L+R)/2, con compresión de amplitud para ver señales bajas
         const float x = -s, y = m, mag = std::hypot (x, y);
         const float f = mag > 1.0e-6f ? std::pow (mag, 0.6f) / mag : 0.0f;
         pts.push_back ({ x * f, y * f });
     }
 
-    const double nn = (double) n;
-    const float refGain = std::pow (10.0f, -kVuRefDbFS / 20.0f);
-    const float rm[4] = { (float) std::sqrt (sl / nn), (float) std::sqrt (sr / nn),
-                          (float) std::sqrt (sm / nn), (float) std::sqrt (ss / nn) };
+    const float tp[4] = {
+        truePeak (n, [l] (int i) { return l[i]; }),
+        truePeak (n, [r] (int i) { return r[i]; }),
+        truePeak (n, [l, r] (int i) { return 0.5f * (l[i] + r[i]); }),
+        truePeak (n, [l, r] (int i) { return 0.5f * (l[i] - r[i]); })
+    };
+
     for (int k = 0; k < 4; ++k)
-        vu[(size_t) k] += (rm[k] * refGain - vu[(size_t) k]) * 0.12f;
+    {
+        const float db = amplitudeToDbTp (tp[(size_t) k]);
+        float& current = vuTpDb[(size_t) k];
+        current = db > current ? current + (db - current) * 0.6f : juce::jmax (db, current - 1.6f);
+    }
 
     const float c = (sl + sr < 1.0e-10) ? 0.0f : (float) (lr / (std::sqrt (sl * sr) + 1.0e-12));
     corr += (c - corr) * 0.15f;
@@ -91,9 +122,9 @@ void StereoPanel::process (const float* l, const float* r, int n)
         const float p0 = acc[(size_t) juce::jmax (0, b - 1)];
         const float p1 = acc[(size_t) b];
         const float p2 = acc[(size_t) juce::jmin (kPolarBins - 1, b + 1)];
-        const float p  = (p0 + 2.0f * p1 + p2) * 0.25f / (float) n;
+        const float p = (p0 + 2.0f * p1 + p2) * 0.25f / (float) n;
         const float db = 10.0f * std::log10 (p + 1.0e-12f);
-        const float v  = juce::jlimit (0.0f, 1.0f, (db + kPolarRangeDb) / kPolarRangeDb);
+        const float v = juce::jlimit (0.0f, 1.0f, (db + kPolarRangeDb) / kPolarRangeDb);
         float& cur = polar[(size_t) b];
         cur += (v - cur) * (v > cur ? 0.5f : 0.12f);
     }
@@ -140,7 +171,6 @@ void StereoPanel::paint (juce::Graphics& g)
     else                  drawVU (g);
 }
 
-// ---------------- Diseño 1: polar (semicírculo L ... R) ----------------
 void StereoPanel::drawPolar (juce::Graphics& g)
 {
     const float cx = 340.0f, by = 192.0f, R = 140.0f;
@@ -186,7 +216,6 @@ void StereoPanel::drawPolar (juce::Graphics& g)
     drawTxt (g, axisFont, "R", cx + R + 14.0f, by - 2.0f, 1);
 }
 
-// ---------------- Diseño 2: goniómetro / vectorscope ----------------
 void StereoPanel::drawScope (juce::Graphics& g)
 {
     const float cx = 340.0f, cy = 100.0f, r = 60.0f;
@@ -225,7 +254,6 @@ void StereoPanel::drawScope (juce::Graphics& g)
     drawTxt (g, smallFont, "L", cx - r * 0.75f, cy - r * 0.75f, 1);
     drawTxt (g, smallFont, "R", cx + r * 0.75f, cy - r * 0.75f, 1);
 
-    // Barra de correlación (-1 ... 0 ... +1)
     g.setColour (faceTop);
     g.fillRoundedRectangle (262.0f, 166.0f, 156.0f, 4.0f, 2.0f);
     g.setColour (label.withAlpha (0.6f));
@@ -238,11 +266,10 @@ void StereoPanel::drawScope (juce::Graphics& g)
     drawTxt (g, axisFont, dbTxt + " dB  " + juce::String (corr, 2), 424.0f, 190.0f, 2);
 }
 
-// ---------------- Diseño 3: 4 vúmetros L / R / M / S ----------------
 void StereoPanel::drawVU (juce::Graphics& g)
 {
     const char* names[4] = { "L", "R", "M", "S" };
-    const juce::Colour cols[4] = { low, high, mid, readout };
+    const juce::Colour cols[4] = { low, blue, mid, high };
     const float Rs = 92.0f;
 
     for (int i = 0; i < 4; ++i)
@@ -261,7 +288,7 @@ void StereoPanel::drawVU (juce::Graphics& g)
 
         juce::Path a1, a2;
         a1.addCentredArc (px, py, Rs, Rs, 0.0f, tickAngle (-20.0f), tickAngle (0.0f), true);
-        a2.addCentredArc (px, py, Rs, Rs, 0.0f, tickAngle (0.0f),   tickAngle (3.0f), true);
+        a2.addCentredArc (px, py, Rs, Rs, 0.0f, tickAngle (0.0f), tickAngle (3.0f), true);
         g.setColour (label.withAlpha (0.8f));
         g.strokePath (a1, juce::PathStrokeType (1.2f));
         g.setColour (high);
@@ -277,7 +304,7 @@ void StereoPanel::drawVU (juce::Graphics& g)
             drawTxt (g, smallFont, juce::String ((int) v), lp.x, lp.y + 3.0f, 1);
         }
 
-        const float a = vuAngle (vu[(size_t) i]);
+        const float a = vuAngleDb (vuTpDb[(size_t) i]);
         const auto tip = pol (px, py, a, Rs + 8.0f);
         g.setColour (cols[i].withAlpha (0.25f));
         g.drawLine (px, py, tip.x, tip.y, 4.0f);
@@ -285,6 +312,8 @@ void StereoPanel::drawVU (juce::Graphics& g)
         g.drawLine (px, py, tip.x, tip.y, 1.5f);
 
         g.setColour (cols[i]);
-        drawTxt (g, bigFont, names[i], px, cell.getBottom() - 14.0f, 1);
+        drawTxt (g, bigFont, names[i], px, cell.getBottom() - 18.0f, 1);
+        g.setColour (readout);
+        drawTxt (g, smallFont, juce::String (vuTpDb[(size_t) i], 1) + " dBTP", px, cell.getBottom() - 5.0f, 1);
     }
 }

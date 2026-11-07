@@ -1,7 +1,7 @@
 #pragma once
+
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
-#include "PluginProcessor.h"
 #include "StereoPanel.h"
 #include "UIConstants.h"
 
@@ -25,7 +25,7 @@ private:
     void setStereoOpen (bool open);
 
     static constexpr int kFFTOrder = 13;
-    static constexpr int kFFTSize  = 1 << kFFTOrder;   // 8192
+    static constexpr int kFFTSize  = 1 << kFFTOrder;
 
     ClarityAudioProcessor& processor;
     juce::ComponentBoundsConstrainer constrainer;
@@ -41,7 +41,7 @@ private:
     juce::Font titleFont, subFont, axisFont;
     juce::Image logo;
     bool  hover  = false;
-    float hoverX = 0.0f, hoverY = 0.0f;   // coordenadas lógicas (680 x ...)
+    float hoverX = 0.0f, hoverY = 0.0f;
 
     StereoPanel panel;
     bool stereoOpen = false;

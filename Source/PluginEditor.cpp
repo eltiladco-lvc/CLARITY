@@ -1,5 +1,5 @@
 #include "PluginEditor.h"
-#include <BinaryData.h>      // generado por juce_add_binary_data (logo + fuentes)
+#include <BinaryData.h>
 #include <cmath>
 
 using namespace clarity::ui;
@@ -8,7 +8,6 @@ namespace
 {
     enum class Align { left, centre, right };
 
-    // Carga una tipografía incrustada (ej. "Hoshiko_ttf"); nullptr si no existe
     juce::Typeface::Ptr loadTypeface (const char* resourceName)
     {
         int size = 0;
@@ -17,7 +16,6 @@ namespace
         return nullptr;
     }
 
-    // Tamaño en "px CSS" (em), igual que font-size en el mockup
     juce::Font makeFont (juce::Typeface::Ptr tf, const char* fallbackName, float px)
     {
         if (tf != nullptr)
@@ -32,7 +30,6 @@ namespace
         return ga.getBoundingBox (0, -1, true).getWidth();
     }
 
-    // Dibuja texto por línea base (igual que SVG <text x y>)
     void drawText (juce::Graphics& g, const juce::Font& f, const juce::String& t,
                    float x, float baseline, Align a)
     {
@@ -44,10 +41,8 @@ namespace
         ga.draw (g);
     }
 
-    // Posición X <-> frecuencia (coincide con el centro de cada barra de 1/3 de octava)
     float freqToX (float hz) { return kPX + kBW * 0.5f + 3.0f * std::log2 (hz / 20.0f) * kBW; }
     float xToFreq (float x)  { return 20.0f * std::pow (2.0f, (x - kPX - kBW * 0.5f) / (3.0f * kBW)); }
-
     float barFreq (int i) { return 20.0f * std::pow (2.0f, (float) i / 3.0f); }
 
     juce::Colour zoneColour (float hz)
@@ -64,13 +59,11 @@ ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor&
 {
     level.fill (-90.0f);
 
-    // Normalización de la ventana (para que un seno a escala completa lea 0 dB)
     std::vector<float> ones ((size_t) kFFTSize, 1.0f);
     window.multiplyWithWindowingTable (ones.data(), (size_t) kFFTSize);
     windowSum = 0.0f;
     for (float v : ones) windowSum += v;
 
-    // Tipografías: Hoshiko (si la pones en Resources/fonts) -> Yuji Boku -> sistema
     auto titleTf = loadTypeface ("Hoshiko_ttf");
     if (titleTf == nullptr) titleTf = loadTypeface ("YujiBoku_ttf");
     titleFont = makeFont (titleTf, "Brush Script MT", 30.0f).withExtraKerningFactor (2.0f / 30.0f);
@@ -109,7 +102,7 @@ void ClarityAudioProcessorEditor::timerCallback()
 {
     analyse();
     const float sc = (float) getWidth() / kW;
-    repaint (0, 0, getWidth(), juce::roundToInt (kHClosed * sc));       // solo espectro + botón
+    repaint (0, 0, getWidth(), juce::roundToInt (kHClosed * sc));
 
     if (stereoOpen)
     {
@@ -155,7 +148,13 @@ void ClarityAudioProcessorEditor::analyse()
     const double binHz = sr / (double) kFFTSize;
     const int maxBin   = kFFTSize / 2 - 1;
     const float norm   = 2.0f / windowSum;
-    const double edge  = std::pow (2.0, 1.0 / 6.0);       // límites de 1/3 de octava
+    const double edge  = std::pow (2.0, 1.0 / 6.0);
+
+    const auto correctBand = [] (double hz)
+    {
+        if (hz < 3500.0) return 0.0;
+        return std::min (5.0, 5.0 * (std::log10 (hz / 3500.0) / std::log10 (20000.0 / 3500.0)));
+    };
 
     for (int i = 0; i < kNumBars; ++i)
     {
@@ -177,7 +176,7 @@ void ClarityAudioProcessorEditor::analyse()
                     const double a = (double) fftData[(size_t) b] * (double) norm;
                     power += a * a;
                 }
-                power /= 1.5;                              // ENBW de la ventana Hann
+                power /= 1.5;
             }
             else
             {
@@ -185,7 +184,8 @@ void ClarityAudioProcessorEditor::analyse()
                 const double a = (double) fftData[(size_t) b] * (double) norm;
                 power = a * a;
             }
-            db = (float) (10.0 * std::log10 (power + 1.0e-12)) + kDisplayOffsetDb;
+
+            db = (float) (10.0 * std::log10 (power + 1.0e-12)) + (float) correctBand (fc);
         }
 
         float& d = level[(size_t) i];
@@ -199,13 +199,11 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillAll (bg);
     g.addTransform (juce::AffineTransform::scale ((float) getWidth() / kW));
 
-    // --- Panel del analizador ---------------------------------------
     g.setColour (bg);
     g.fillRoundedRectangle (10.0f, 46.0f, 660.0f, 150.0f, 6.0f);
     g.setColour (border);
     g.drawRoundedRectangle (10.0f, 46.0f, 660.0f, 150.0f, 6.0f, 2.0f);
 
-    // Rejilla horizontal + escala en dB
     for (int d = 0; d >= (int) kDbMin; d -= (int) kDbStep)
     {
         const float y = kY0 + (float) (-d) / (-kDbMin) * (kY1 - kY0);
@@ -215,7 +213,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
         drawText (g, axisFont, juce::String (d), 40.0f, y + 4.0f, Align::right);
     }
 
-    // Fondo HomeSounds (semitransparente, centrado detrás de las barras)
     if (logo.isValid())
     {
         g.setOpacity (0.45f);
@@ -224,7 +221,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
                      juce::RectanglePlacement::centred);
     }
 
-    // --- Barras (31 bandas de 1/3 de octava, SIN líneas divisorias) ----
     for (int i = 0; i < kNumBars; ++i)
     {
         const float dB = juce::jlimit (kDbMin, 0.0f, level[(size_t) i]);
@@ -234,7 +230,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (zoneColour (barFreq (i)).withAlpha (0.9f));
         g.fillRect (x, y, kBW - 4.0f, h);
-
         if (h > 3.0f)
         {
             g.setColour (white.withAlpha (0.7f));
@@ -242,7 +237,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
         }
     }
 
-    // Etiquetas de frecuencia
     g.setColour (label);
     const struct { float hz; const char* txt; } fl[] = {
         {25.0f,"25"},{50.0f,"50"},{100.0f,"100"},{200.0f,"200"},{500.0f,"500"},
@@ -250,13 +244,11 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     for (auto& l : fl)
         drawText (g, axisFont, l.txt, freqToX (l.hz), 192.0f, Align::centre);
 
-    // --- Cabecera: título + Powered By -------------------------------
     g.setColour (bg);
     g.fillRect (0.0f, 0.0f, kW, 40.0f);
     g.setColour (border);
     g.drawLine (0.0f, 40.0f, kW, 40.0f, 1.0f);
 
-    // Título pegado, cada letra con el color de las barras
     {
         juce::GlyphArrangement ga;
         ga.addLineOfText (titleFont, kTitle, 16.0f, 32.0f);
@@ -270,7 +262,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (powered);
     drawText (g, subFont, kSubtitle, 664.0f, 28.0f, Align::right);
 
-    // --- Botón CampoStereo ---------------------------------------------
     {
         const juce::Rectangle<float> r (270.0f, 208.0f, 140.0f, 20.0f);
         g.setColour (stereoOpen ? mid : btn);
@@ -281,7 +272,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
         drawText (g, axisFont, "CampoStereo", r.getCentreX(), r.getY() + 14.0f, Align::centre);
     }
 
-    // --- Lectura al pasar el ratón (esquina superior derecha del analizador) ---
     if (hover)
     {
         const float x   = juce::jlimit (kPX, kRight, hoverX);
