@@ -152,18 +152,19 @@ void ClarityAudioProcessorEditor::analyse()
     const double norm  = 2.0 / (double) windowSum;
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
-    // A restrained, smooth high-frequency compensation: 0 dB at 3.5 kHz,
-    // rises gently to only +2 dB at 10 kHz, then stays flat to avoid harsh highs.
+    // Image comparison indicates an approximately 10 dB shortfall from 1 kHz upward.
+    // Apply a smooth calibration ramp starting at 1 kHz, reaching +10 dB by 2 kHz,
+    // then maintain the correction through 20 kHz (rather than changing display styling).
     const auto highBandCorrectionDb = [] (double hz)
     {
-        constexpr double startHz = 3500.0;
-        constexpr double fullCorrectionHz = 10000.0;
-        constexpr double maxCorrectionDb = 2.0;
+        constexpr double startHz = 1000.0;
+        constexpr double fullCorrectionHz = 2000.0;
+        constexpr double correctionDb = 10.0;
         if (hz <= startHz) return 0.0;
-        if (hz >= fullCorrectionHz) return maxCorrectionDb;
+        if (hz >= fullCorrectionHz) return correctionDb;
         const double t = std::log (hz / startHz) / std::log (fullCorrectionHz / startHz);
         const double smooth = t * t * (3.0 - 2.0 * t);
-        return maxCorrectionDb * smooth;
+        return correctionDb * smooth;
     };
 
     for (int i = 0; i < kNumBars; ++i)
