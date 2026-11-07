@@ -152,14 +152,13 @@ void ClarityAudioProcessorEditor::analyse()
     const double norm  = 2.0 / (double) windowSum;
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
-    // Smooth logarithmic transition from 0 dB correction at 3.5 kHz to +5 dB
-    // at 5 kHz, then hold that correction through the upper bands. This avoids
-    // a sudden step at 3.5 kHz or an under-correction in the 5-20 kHz region.
+    // A restrained, smooth high-frequency compensation: 0 dB at 3.5 kHz,
+    // rises gently to only +2 dB at 10 kHz, then stays flat to avoid harsh highs.
     const auto highBandCorrectionDb = [] (double hz)
     {
         constexpr double startHz = 3500.0;
-        constexpr double fullCorrectionHz = 5000.0;
-        constexpr double maxCorrectionDb = 5.0;
+        constexpr double fullCorrectionHz = 10000.0;
+        constexpr double maxCorrectionDb = 2.0;
         if (hz <= startHz) return 0.0;
         if (hz >= fullCorrectionHz) return maxCorrectionDb;
         const double t = std::log (hz / startHz) / std::log (fullCorrectionHz / startHz);
@@ -207,7 +206,7 @@ void ClarityAudioProcessorEditor::analyse()
         else
             current = juce::jmax (db, previous - kReleaseDbPF);
 
-        // Independent, slow peak-marker decay; it never falls below the live bar.
+        // Independent, very slow peak-marker decay for an analog-style persistence.
         float& heldPeak = peakHoldDb[(size_t) i];
         heldPeak = db >= heldPeak ? db : juce::jmax (db, heldPeak - kPeakHoldReleaseDbPF);
     }
@@ -250,7 +249,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour (zoneColour (barFreq (i)).withAlpha (0.9f));
         g.fillRect (x, y, kBW - 4.0f, h);
 
-        // Thin light peak marker, preserving the existing visual style.
         const float heldDb = juce::jlimit (kDbMin, 0.0f, peakHoldDb[(size_t) i]);
         const float heldY = kY0 + (-heldDb) / (-kDbMin) * (kY1 - kY0);
         if (peakHoldDb[(size_t) i] > kDbMin && heldY + 2.0f < kY1)
