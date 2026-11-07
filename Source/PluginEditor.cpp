@@ -138,77 +138,30 @@ void ClarityAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         setStereoOpen (! stereoOpen);
 }
 
-void ClarityAudioProcessorEditor::calibrateBands (double sampleRate)
-{
-    if (sampleRate <= 0.0 || std::abs (sampleRate - calibratedSampleRate) < 0.5)
-        return;
-
-    calibratedSampleRate = sampleRate;
-    const double binHz = sampleRate / (double) kFFTSize;
-    const int maxBin = kFFTSize / 2 - 1;
-    const double edge = std::pow (2.0, 1.0 / 6.0);
-    const double norm = 2.0 / (double) windowSum;
-
-    for (int i = 0; i < kNumBars; ++i)
-    {
-        const double fc = (double) barFreq (i);
-        if (fc >= sampleRate * 0.5)
-        {
-            bandCalibrationDb[(size_t) i] = 0.0f;
-            continue;
-        }
-
-        std::fill (fftData.begin(), fftData.end(), 0.0f);
-        for (int sample = 0; sample < kFFTSize; ++sample)
-            fftData[(size_t) sample] = (float) std::sin (juce::MathConstants<double>::twoPi * fc * (double) sample / sampleRate);
-        window.multiplyWithWindowingTable (fftData.data(), (size_t) kFFTSize);
-        fft.performFrequencyOnlyForwardTransform (fftData.data());
-
-        const double bLo = (fc / edge) / binHz;
-        const double bHi = (fc * edge) / binHz;
-        const int b0 = juce::jlimit (0, maxBin, (int) std::ceil (bLo));
-        const int b1 = juce::jlimit (0, maxBin, (int) std::floor (bHi));
-        double power = 0.0;
-
-        if (b1 >= b0)
-        {
-            for (int bin = b0; bin <= b1; ++bin)
-            {
-                const double amplitude = (double) fftData[(size_t) bin] * norm;
-                power += amplitude * amplitude;
-            }
-            power /= 1.5;
-        }
-        else
-        {
-            const int bin = juce::jlimit (0, maxBin, (int) std::lround (0.5 * (bLo + bHi)));
-            const double amplitude = (double) fftData[(size_t) bin] * norm;
-            power = amplitude * amplitude;
-        }
-
-        const double measuredDb = 10.0 * std::log10 (power + 1.0e-20);
-        bandCalibrationDb[(size_t) i] = (float) juce::jlimit (-12.0, 12.0, -measuredDb);
-    }
-}
-
 void ClarityAudioProcessorEditor::analyse()
 {
-    const double sampleRate = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 44100.0;
-    calibrateBands (sampleRate);
-
+    // Reuse the prior plugin's analyser response: mono FFT + per-band power accumulation + smooth attack/release.
     processor.copyLatest (fftData.data(), kFFTSize);
     std::fill (fftData.begin() + kFFTSize, fftData.end(), 0.0f);
     window.multiplyWithWindowingTable (fftData.data(), (size_t) kFFTSize);
     fft.performFrequencyOnlyForwardTransform (fftData.data());
 
-    const double binHz = sampleRate / (double) kFFTSize;
-    const int maxBin = kFFTSize / 2 - 1;
-    const double norm = 2.0 / (double) windowSum;
-    const double edge = std::pow (2.0, 1.0 / 6.0);
+    const double sr    = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 44100.0;
+    const double binHz = sr / (double) kFFTSize;
+    const int maxBin   = kFFTSize / 2 - 1;
+    const float norm   = 2.0f / windowSum;
+    const double edge  = std::pow (2.0, 1.0 / 6.0);
+
+    const auto correctBand = [] (double hz)
+    {
+        // The previous analyzer was under-reading above ~3.5 kHz by about 5 dB.
+        if (hz < 3500.0) return 0.0;
+        return std::min (5.0, 5.0 * (std::log10 (hz / 3500.0) / std::log10 (20000.0 / 3500.0)));
+    };
 
     for (int i = 0; i < kNumBars; ++i)
     {
-        const double fc = (double) barFreq (i);
+        const double fc  = (double) barFreq (i);
         const double bLo = (fc / edge) / binHz;
         const double bHi = (fc * edge) / binHz;
         float db = -100.0f;
@@ -221,30 +174,29 @@ void ClarityAudioProcessorEditor::analyse()
 
             if (b1 >= b0)
             {
-                for (int bin = b0; bin <= b1; ++bin)
+                for (int b = b0; b <= b1; ++b)
                 {
-                    const double amplitude = (double) fftData[(size_t) bin] * norm;
-                    power += amplitude * amplitude;
+                    const double a = (double) fftData[(size_t) b] * (double) norm;
+                    power += a * a;
                 }
                 power /= 1.5;
             }
             else
             {
-                const int bin = juce::jlimit (0, maxBin, (int) std::lround (0.5 * (bLo + bHi)));
-                const double amplitude = (double) fftData[(size_t) bin] * norm;
-                power = amplitude * amplitude;
+                const int b = juce::jlimit (0, maxBin, (int) std::lround (0.5 * (bLo + bHi)));
+                const double a = (double) fftData[(size_t) b] * (double) norm;
+                power = a * a;
             }
 
-            db = (float) (10.0 * std::log10 (power + 1.0e-12)
-                          + (double) bandCalibrationDb[(size_t) i]);
+            db = (float) (10.0 * std::log10 (power + 1.0e-12)) + (float) correctBand (fc);
         }
 
         float& d = level[(size_t) i];
         d = (db > d) ? d + (db - d) * kAttack
                      : juce::jmax (db, d - kReleaseDbPF);
 
-        float& held = peakHoldDb[(size_t) i];
-        held = db > held ? db : juce::jmax (db, held - 0.22f);
+        const float peakTarget = juce::jmax (peakHoldDb[(size_t) i], db);
+        peakHoldDb[(size_t) i] = peakTarget - 0.12f;
     }
 }
 
@@ -284,14 +236,10 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (zoneColour (barFreq (i)).withAlpha (0.9f));
         g.fillRect (x, y, kBW - 4.0f, h);
-
-        // Separate slowly-falling peak cap, like the reference spectrum analyzer.
-        const float heldDb = juce::jlimit (kDbMin, 0.0f, peakHoldDb[(size_t) i]);
-        const float heldY = kY0 + (-heldDb) / (-kDbMin) * (kY1 - kY0);
-        if (peakHoldDb[(size_t) i] > kDbMin && heldY + 2.0f < kY1)
+        if (h > 3.0f)
         {
-            g.setColour (juce::Colour (0xffc7cbd3).withAlpha (0.9f));
-            g.fillRect (x, heldY, kBW - 4.0f, 2.0f);
+            g.setColour (white.withAlpha (0.7f));
+            g.fillRect (x, y, kBW - 4.0f, 2.0f);
         }
     }
 
@@ -332,12 +280,12 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
 
     if (hover)
     {
-        const float x = juce::jlimit (kPX, kRight, hoverX);
-        const float hz = juce::jlimit (20.0f, 20000.0f, xToFreq (x));
-        const int bar = juce::jlimit (0, kNumBars - 1, (int) std::floor ((x - kPX) / kBW));
-        const float db = kHoverShowsBarLevel
-                           ? level[(size_t) bar]
-                           : (juce::jlimit (kY0, kY1, hoverY) - kY0) / (kY1 - kY0) * kDbMin;
+        const float x   = juce::jlimit (kPX, kRight, hoverX);
+        const float hz  = juce::jlimit (20.0f, 20000.0f, xToFreq (x));
+        const int   bar = juce::jlimit (0, kNumBars - 1, (int) std::floor ((x - kPX) / kBW));
+        const float db  = kHoverShowsBarLevel
+                            ? level[(size_t) bar]
+                            : (juce::jlimit (kY0, kY1, hoverY) - kY0) / (kY1 - kY0) * kDbMin;
 
         g.setColour (white.withAlpha (0.25f));
         g.drawLine (x, kY0, x, kY1, 1.0f);
@@ -360,7 +308,7 @@ void ClarityAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
     const float s = (float) getWidth() / kW;
     hoverX = e.position.x / s;
     hoverY = e.position.y / s;
-    hover = hoverX >= kPX && hoverX <= kRight && hoverY >= 46.0f && hoverY <= 196.0f;
+    hover  = hoverX >= kPX && hoverX <= kRight && hoverY >= 46.0f && hoverY <= 196.0f;
 }
 
 void ClarityAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e) { mouseMove (e); }
