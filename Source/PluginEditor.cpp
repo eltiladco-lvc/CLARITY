@@ -153,8 +153,7 @@ void ClarityAudioProcessorEditor::analyse()
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
     // Image comparison indicates an approximately 10 dB shortfall from 1 kHz upward.
-    // Apply a smooth calibration ramp starting at 1 kHz, reaching +10 dB by 2 kHz,
-    // then maintain the correction through 20 kHz (rather than changing display styling).
+    // Ramp the correction smoothly from 1 to 2 kHz, then hold it to 20 kHz.
     const auto highBandCorrectionDb = [] (double hz)
     {
         constexpr double startHz = 1000.0;
@@ -207,7 +206,6 @@ void ClarityAudioProcessorEditor::analyse()
         else
             current = juce::jmax (db, previous - kReleaseDbPF);
 
-        // Independent, very slow peak-marker decay for an analog-style persistence.
         float& heldPeak = peakHoldDb[(size_t) i];
         heldPeak = db >= heldPeak ? db : juce::jmax (db, heldPeak - kPeakHoldReleaseDbPF);
     }
