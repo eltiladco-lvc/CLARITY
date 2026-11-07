@@ -25,8 +25,12 @@ namespace clarity::ui
     constexpr float kLowZoneHz = 123.0f;
     constexpr float kHighZoneHz = 4500.0f;
     constexpr bool kHoverShowsBarLevel = true;
-    constexpr float kAttack = 0.6f;
-    constexpr float kReleaseDbPF = 1.6f;
+
+    // Spectrum ballistics at the 60 Hz UI refresh rate: fast transient pickup,
+    // slower release, and a separate gently decaying peak marker.
+    constexpr float kAttack = 0.88f;
+    constexpr float kReleaseDbPF = 0.35f;
+    constexpr float kPeakHoldReleaseDbPF = 0.18f;
 
     inline const char* kTitle = "CLARITY";
     inline const char* kSubtitle = "Powered By Tiladco";

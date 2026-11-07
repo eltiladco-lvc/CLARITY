@@ -140,7 +140,7 @@ void ClarityAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
 
 void ClarityAudioProcessorEditor::analyse()
 {
-    // Reuse the prior plugin's analyser response: mono FFT + per-band power accumulation + smooth attack/release.
+    // Mono FFT and per-band power accumulation, retaining CLARITY's current layout.
     processor.copyLatest (fftData.data(), kFFTSize);
     std::fill (fftData.begin() + kFFTSize, fftData.end(), 0.0f);
     window.multiplyWithWindowingTable (fftData.data(), (size_t) kFFTSize);
@@ -149,14 +149,22 @@ void ClarityAudioProcessorEditor::analyse()
     const double sr    = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 44100.0;
     const double binHz = sr / (double) kFFTSize;
     const int maxBin   = kFFTSize / 2 - 1;
-    const float norm   = 2.0f / windowSum;
+    const double norm  = 2.0 / (double) windowSum;
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
-    const auto correctBand = [] (double hz)
+    // Smooth logarithmic transition from 0 dB correction at 3.5 kHz to +5 dB
+    // at 5 kHz, then hold that correction through the upper bands. This avoids
+    // a sudden step at 3.5 kHz or an under-correction in the 5-20 kHz region.
+    const auto highBandCorrectionDb = [] (double hz)
     {
-        // The previous analyzer was under-reading above ~3.5 kHz by about 5 dB.
-        if (hz < 3500.0) return 0.0;
-        return std::min (5.0, 5.0 * (std::log10 (hz / 3500.0) / std::log10 (20000.0 / 3500.0)));
+        constexpr double startHz = 3500.0;
+        constexpr double fullCorrectionHz = 5000.0;
+        constexpr double maxCorrectionDb = 5.0;
+        if (hz <= startHz) return 0.0;
+        if (hz >= fullCorrectionHz) return maxCorrectionDb;
+        const double t = std::log (hz / startHz) / std::log (fullCorrectionHz / startHz);
+        const double smooth = t * t * (3.0 - 2.0 * t);
+        return maxCorrectionDb * smooth;
     };
 
     for (int i = 0; i < kNumBars; ++i)
@@ -168,35 +176,40 @@ void ClarityAudioProcessorEditor::analyse()
 
         if (bLo <= (double) maxBin)
         {
-            const int b0 = (int) std::ceil (bLo);
-            const int b1 = juce::jmin (maxBin, (int) std::floor (bHi));
+            const int b0 = juce::jlimit (0, maxBin, (int) std::ceil (bLo));
+            const int b1 = juce::jlimit (0, maxBin, (int) std::floor (bHi));
             double power = 0.0;
 
             if (b1 >= b0)
             {
                 for (int b = b0; b <= b1; ++b)
                 {
-                    const double a = (double) fftData[(size_t) b] * (double) norm;
-                    power += a * a;
+                    const double amplitude = (double) fftData[(size_t) b] * norm;
+                    power += amplitude * amplitude;
                 }
-                power /= 1.5;
+                power /= 1.5; // Hann window ENBW normalization
             }
             else
             {
                 const int b = juce::jlimit (0, maxBin, (int) std::lround (0.5 * (bLo + bHi)));
-                const double a = (double) fftData[(size_t) b] * (double) norm;
-                power = a * a;
+                const double amplitude = (double) fftData[(size_t) b] * norm;
+                power = amplitude * amplitude;
             }
 
-            db = (float) (10.0 * std::log10 (power + 1.0e-12)) + (float) correctBand (fc);
+            db = (float) (10.0 * std::log10 (power + 1.0e-12)
+                          + highBandCorrectionDb (fc) + kDisplayOffsetDb);
         }
 
-        float& d = level[(size_t) i];
-        d = (db > d) ? d + (db - d) * kAttack
-                     : juce::jmax (db, d - kReleaseDbPF);
+        float& current = level[(size_t) i];
+        const float previous = current;
+        if (db >= previous)
+            current = previous + (db - previous) * kAttack;
+        else
+            current = juce::jmax (db, previous - kReleaseDbPF);
 
-        const float peakTarget = juce::jmax (peakHoldDb[(size_t) i], db);
-        peakHoldDb[(size_t) i] = peakTarget - 0.12f;
+        // Independent, slow peak-marker decay; it never falls below the live bar.
+        float& heldPeak = peakHoldDb[(size_t) i];
+        heldPeak = db >= heldPeak ? db : juce::jmax (db, heldPeak - kPeakHoldReleaseDbPF);
     }
 }
 
@@ -236,10 +249,14 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (zoneColour (barFreq (i)).withAlpha (0.9f));
         g.fillRect (x, y, kBW - 4.0f, h);
-        if (h > 3.0f)
+
+        // Thin light peak marker, preserving the existing visual style.
+        const float heldDb = juce::jlimit (kDbMin, 0.0f, peakHoldDb[(size_t) i]);
+        const float heldY = kY0 + (-heldDb) / (-kDbMin) * (kY1 - kY0);
+        if (peakHoldDb[(size_t) i] > kDbMin && heldY + 2.0f < kY1)
         {
-            g.setColour (white.withAlpha (0.7f));
-            g.fillRect (x, y, kBW - 4.0f, 2.0f);
+            g.setColour (white.withAlpha (0.75f));
+            g.fillRect (x, heldY, kBW - 4.0f, 2.0f);
         }
     }
 
