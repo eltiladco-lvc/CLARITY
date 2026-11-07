@@ -51,6 +51,20 @@ namespace
         if (hz < kHighZoneHz) return mid;
         return high;
     }
+
+    double smoothStep (double t)
+    {
+        t = juce::jlimit (0.0, 1.0, t);
+        return t * t * (3.0 - 2.0 * t);
+    }
+
+    double logRamp (double hz, double startHz, double endHz, double maxDb)
+    {
+        if (hz <= startHz) return 0.0;
+        if (hz >= endHz) return maxDb;
+        const double t = std::log (hz / startHz) / std::log (endHz / startHz);
+        return maxDb * smoothStep (t);
+    }
 }
 
 ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor& p)
@@ -140,7 +154,6 @@ void ClarityAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
 
 void ClarityAudioProcessorEditor::analyse()
 {
-    // Mono FFT and per-band power accumulation, retaining CLARITY's current layout.
     processor.copyLatest (fftData.data(), kFFTSize);
     std::fill (fftData.begin() + kFFTSize, fftData.end(), 0.0f);
     window.multiplyWithWindowingTable (fftData.data(), (size_t) kFFTSize);
@@ -152,18 +165,31 @@ void ClarityAudioProcessorEditor::analyse()
     const double norm  = 2.0 / (double) windowSum;
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
-    // Image comparison indicates an approximately 10 dB shortfall from 1 kHz upward.
-    // Ramp the correction smoothly from 1 to 2 kHz, then hold it to 20 kHz.
+    // Requested calibration ramps: +5 dB across 55-900 Hz, then +10 dB
+    // across 1-2 kHz, held through 20 kHz. Smooth overlaps avoid jumps at joins.
+    const auto midCorrectionDb = [] (double hz)
+    {
+        constexpr double fadeInHz = 43.0;
+        constexpr double fullGainStartHz = 55.0;
+        constexpr double fullGainEndHz = 900.0;
+        constexpr double fadeOutHz = 1100.0;
+        constexpr double gainDb = 5.0;
+
+        if (hz < fadeInHz || hz >= fadeOutHz)
+            return 0.0;
+        if (hz >= fullGainStartHz && hz <= fullGainEndHz)
+            return gainDb;
+        if (hz < fullGainStartHz)
+            return gainDb * smoothStep (std::log (hz / fadeInHz) / std::log (fullGainStartHz / fadeInHz));
+        return gainDb * smoothStep (std::log (fadeOutHz / hz) / std::log (fadeOutHz / fullGainEndHz));
+    };
+
     const auto highBandCorrectionDb = [] (double hz)
     {
         constexpr double startHz = 1000.0;
         constexpr double fullCorrectionHz = 2000.0;
         constexpr double correctionDb = 10.0;
-        if (hz <= startHz) return 0.0;
-        if (hz >= fullCorrectionHz) return correctionDb;
-        const double t = std::log (hz / startHz) / std::log (fullCorrectionHz / startHz);
-        const double smooth = t * t * (3.0 - 2.0 * t);
-        return correctionDb * smooth;
+        return logRamp (hz, startHz, fullCorrectionHz, correctionDb);
     };
 
     for (int i = 0; i < kNumBars; ++i)
@@ -196,7 +222,9 @@ void ClarityAudioProcessorEditor::analyse()
             }
 
             db = (float) (10.0 * std::log10 (power + 1.0e-12)
-                          + highBandCorrectionDb (fc) + kDisplayOffsetDb);
+                          + midCorrectionDb (fc)
+                          + highBandCorrectionDb (fc)
+                          + kDisplayOffsetDb);
         }
 
         float& current = level[(size_t) i];
