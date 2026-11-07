@@ -116,7 +116,10 @@ void StereoPanel::process (const float* l, const float* r, int n)
         current = db > current ? current + (db - current) * 0.6f : juce::jmax (db, current - 1.6f);
     }
 
-    outputPeakDbTp = amplitudeToDbTp (juce::jmax (tp[0], tp[1]));
+    const float outputDb = amplitudeToDbTp (juce::jmax (tp[0], tp[1]));
+    outputPeakDbTp = outputDb > outputPeakDbTp
+                       ? outputDb
+                       : juce::jmax (outputDb, outputPeakDbTp - 0.25f);
 
     const float c = (sl + sr < 1.0e-10) ? 0.0f : (float) (lr / (std::sqrt (sl * sr) + 1.0e-12));
     corr += (c - corr) * 0.15f;
@@ -221,50 +224,71 @@ void StereoPanel::drawPolar (juce::Graphics& g)
     drawTxt (g, axisFont, "R", cx + R + 14.0f, by - 2.0f, 1);
 }
 
-// Scope view now presents a segmented output true-peak meter instead of the blue trace.
+// Keep the stereo vectorscope trace and add the segmented output true-peak meter below it.
 void StereoPanel::drawScope (juce::Graphics& g)
 {
-    const juce::Rectangle<float> box (70.0f, 55.0f, 540.0f, 112.0f);
+    const float cx = 340.0f, cy = 93.0f, r = 51.0f;
+    const juce::Rectangle<float> box (250.0f, 34.0f, 180.0f, 128.0f);
+
     g.setColour (dark);
     g.fillRoundedRectangle (box, 6.0f);
     g.setColour (border);
     g.drawRoundedRectangle (box, 6.0f, 2.0f);
 
-    const float labelX = 94.0f;
-    const float meterX = 158.0f;
-    const float meterY = 99.0f;
-    const float meterW = 382.0f;
-    const float meterH = 18.0f;
-    constexpr int segments = 32;
+    const float dash[] = { 3.0f, 4.0f };
+    g.setColour (low.withAlpha (0.28f));
+    for (int k = 0; k < 16; ++k)
+    {
+        const float a = (float) k * kPi / 8.0f;
+        g.drawDashedLine ({ cx + std::cos (a) * 12.0f, cy + std::sin (a) * 12.0f,
+                            cx + std::cos (a) * r,      cy + std::sin (a) * r }, dash, 2, 1.0f);
+    }
+
+    auto trace = [&] (const std::vector<juce::Point<float>>& v)
+    {
+        juce::Path p;
+        for (size_t i = 0; i < v.size(); ++i)
+        {
+            const float x = cx + v[i].x * r;
+            const float y = cy - v[i].y * r;
+            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+        }
+        return p;
+    };
+
+    // Prior trace is subtle persistence; current trace uses the plugin's mint accent.
+    g.setColour (low.withAlpha (0.24f));
+    g.strokePath (trace (prevPts), juce::PathStrokeType (1.0f));
+    g.setColour (mid.withAlpha (0.9f));
+    g.strokePath (trace (pts), juce::PathStrokeType (1.0f));
+
+    const float meterX = 88.0f, meterY = 178.0f, meterW = 486.0f, meterH = 10.0f;
+    constexpr int segments = 36;
     const float gap = 3.0f;
-    const float cellW = (meterW - gap * (segments - 1)) / (float) segments;
+    const float segmentW = (meterW - gap * (segments - 1)) / (float) segments;
     const float fill = juce::jlimit (0.0f, 1.0f, (outputPeakDbTp + 36.0f) / 36.0f);
     const juce::Colour palette[4] = { low, blue, mid, high };
 
     g.setColour (label);
-    drawTxt (g, smallFont, "OUTPUT", labelX, meterY + 13.0f, 0);
+    drawTxt (g, smallFont, "OUTPUT", 20.0f, meterY + 9.0f, 0);
 
     for (int i = 0; i < segments; ++i)
     {
-        const float x = meterX + (float) i * (cellW + gap);
+        const float x = meterX + (float) i * (segmentW + gap);
         const float fraction = juce::jlimit (0.0f, 1.0f, fill * (float) segments - (float) i);
         const juce::Colour colour = palette[juce::jmin (3, i / (segments / 4))];
         g.setColour (faceTop);
-        g.fillRect (x, meterY, cellW, meterH);
+        g.fillRect (x, meterY, segmentW, meterH);
         if (fraction > 0.0f)
         {
             g.setColour (colour);
-            g.fillRect (x, meterY, cellW, meterH * fraction);
+            g.fillRect (x, meterY, segmentW * fraction, meterH);
         }
     }
 
     const juce::String db = outputPeakDbTp < -60.0f ? juce::String ("-INF") : juce::String (outputPeakDbTp, 1);
     g.setColour (readout);
-    drawTxt (g, axisFont, db + " dBTP", 582.0f, meterY + 13.0f, 2);
-
-    g.setColour (label.withAlpha (0.55f));
-    drawTxt (g, smallFont, "-36 dBTP", meterX, 140.0f, 0);
-    drawTxt (g, smallFont, "0 dBTP", meterX + meterW, 140.0f, 2);
+    drawTxt (g, smallFont, db + " dBTP", 650.0f, meterY + 9.0f, 2);
 }
 
 void StereoPanel::drawVU (juce::Graphics& g)
