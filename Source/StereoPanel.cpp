@@ -42,20 +42,23 @@ namespace
     float truePeak (int n, SampleAt&& sampleAt)
     {
         if (n <= 0) return 0.0f;
+        const auto at = [&] (int index) { return sampleAt (juce::jlimit (0, n - 1, index)); };
         float peak = 0.0f;
+
         for (int i = 0; i < n; ++i)
         {
-            const float value = sampleAt (i);
-            peak = juce::jmax (peak, std::abs (value));
+            peak = juce::jmax (peak, std::abs (at (i)));
+            const float p0 = at (i - 1), p1 = at (i), p2 = at (i + 1), p3 = at (i + 2);
 
-            const float next = (i + 1 < n) ? sampleAt (i + 1) : value;
-            const float span = std::abs (next - value);
-            if (span > 1.0e-6f)
+            // Four-times cubic Lagrange interpolation estimates inter-sample peaks.
+            for (int phase = 1; phase < 4; ++phase)
             {
-                const float midpoint = 0.5f * (value + next);
-                const float slope = next - value;
-                const float peakBetween = std::abs (midpoint + 0.25f * slope);
-                peak = juce::jmax (peak, peakBetween);
+                const float t = (float) phase * 0.25f;
+                const float y = p0 * (-t * (t - 1.0f) * (t - 2.0f) / 6.0f)
+                              + p1 * ((t + 1.0f) * (t - 1.0f) * (t - 2.0f) * 0.5f)
+                              + p2 * (-(t + 1.0f) * t * (t - 2.0f) * 0.5f)
+                              + p3 * ((t + 1.0f) * t * (t - 1.0f) / 6.0f);
+                peak = juce::jmax (peak, std::abs (y));
             }
         }
         return peak;
@@ -112,6 +115,8 @@ void StereoPanel::process (const float* l, const float* r, int n)
         float& current = vuTpDb[(size_t) k];
         current = db > current ? current + (db - current) * 0.6f : juce::jmax (db, current - 1.6f);
     }
+
+    outputPeakDbTp = amplitudeToDbTp (juce::jmax (tp[0], tp[1]));
 
     const float c = (sl + sr < 1.0e-10) ? 0.0f : (float) (lr / (std::sqrt (sl * sr) + 1.0e-12));
     corr += (c - corr) * 0.15f;
@@ -216,54 +221,50 @@ void StereoPanel::drawPolar (juce::Graphics& g)
     drawTxt (g, axisFont, "R", cx + R + 14.0f, by - 2.0f, 1);
 }
 
+// Scope view now presents a segmented output true-peak meter instead of the blue trace.
 void StereoPanel::drawScope (juce::Graphics& g)
 {
-    const float cx = 340.0f, cy = 100.0f, r = 60.0f;
-    const juce::Rectangle<float> box (250.0f, 36.0f, 180.0f, 160.0f);
-
+    const juce::Rectangle<float> box (70.0f, 55.0f, 540.0f, 112.0f);
     g.setColour (dark);
     g.fillRoundedRectangle (box, 6.0f);
     g.setColour (border);
     g.drawRoundedRectangle (box, 6.0f, 2.0f);
 
-    const float dash[] = { 3.0f, 4.0f };
-    g.setColour (low.withAlpha (0.35f));
-    for (int k = 0; k < 16; ++k)
-    {
-        const float a = (float) k * kPi / 8.0f;
-        g.drawDashedLine ({ cx + std::cos (a) * 14.0f, cy + std::sin (a) * 14.0f,
-                            cx + std::cos (a) * r,     cy + std::sin (a) * r }, dash, 2, 1.0f);
-    }
-
-    auto trace = [&] (const std::vector<juce::Point<float>>& v)
-    {
-        juce::Path p;
-        for (size_t i = 0; i < v.size(); ++i)
-        {
-            const float x = cx + v[i].x * r, y = cy - v[i].y * r;
-            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
-        }
-        return p;
-    };
-    g.setColour (mid.withAlpha (0.3f));
-    g.strokePath (trace (prevPts), juce::PathStrokeType (1.0f));
-    g.setColour (mid.withAlpha (0.85f));
-    g.strokePath (trace (pts), juce::PathStrokeType (1.0f));
+    const float labelX = 94.0f;
+    const float meterX = 158.0f;
+    const float meterY = 99.0f;
+    const float meterW = 382.0f;
+    const float meterH = 18.0f;
+    constexpr int segments = 32;
+    const float gap = 3.0f;
+    const float cellW = (meterW - gap * (segments - 1)) / (float) segments;
+    const float fill = juce::jlimit (0.0f, 1.0f, (outputPeakDbTp + 36.0f) / 36.0f);
+    const juce::Colour palette[4] = { low, blue, mid, high };
 
     g.setColour (label);
-    drawTxt (g, smallFont, "L", cx - r * 0.75f, cy - r * 0.75f, 1);
-    drawTxt (g, smallFont, "R", cx + r * 0.75f, cy - r * 0.75f, 1);
+    drawTxt (g, smallFont, "OUTPUT", labelX, meterY + 13.0f, 0);
 
-    g.setColour (faceTop);
-    g.fillRoundedRectangle (262.0f, 166.0f, 156.0f, 4.0f, 2.0f);
-    g.setColour (label.withAlpha (0.6f));
-    g.drawLine (cx, 162.0f, cx, 174.0f, 1.0f);
-    g.setColour (mid);
-    g.fillRect (cx + juce::jlimit (-1.0f, 1.0f, corr) * 78.0f - 3.0f, 162.0f, 6.0f, 12.0f);
+    for (int i = 0; i < segments; ++i)
+    {
+        const float x = meterX + (float) i * (cellW + gap);
+        const float fraction = juce::jlimit (0.0f, 1.0f, fill * (float) segments - (float) i);
+        const juce::Colour colour = palette[juce::jmin (3, i / (segments / 4))];
+        g.setColour (faceTop);
+        g.fillRect (x, meterY, cellW, meterH);
+        if (fraction > 0.0f)
+        {
+            g.setColour (colour);
+            g.fillRect (x, meterY, cellW, meterH * fraction);
+        }
+    }
 
-    const juce::String dbTxt = peakHold > 1.0e-4f ? juce::String (20.0f * std::log10 (peakHold), 1) : juce::String ("-INF");
+    const juce::String db = outputPeakDbTp < -60.0f ? juce::String ("-INF") : juce::String (outputPeakDbTp, 1);
     g.setColour (readout);
-    drawTxt (g, axisFont, dbTxt + " dB  " + juce::String (corr, 2), 424.0f, 190.0f, 2);
+    drawTxt (g, axisFont, db + " dBTP", 582.0f, meterY + 13.0f, 2);
+
+    g.setColour (label.withAlpha (0.55f));
+    drawTxt (g, smallFont, "-36 dBTP", meterX, 140.0f, 0);
+    drawTxt (g, smallFont, "0 dBTP", meterX + meterW, 140.0f, 2);
 }
 
 void StereoPanel::drawVU (juce::Graphics& g)

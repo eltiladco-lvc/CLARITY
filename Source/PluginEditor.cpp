@@ -58,6 +58,7 @@ ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor&
       blkL ((size_t) kStereoBlock, 0.0f), blkR ((size_t) kStereoBlock, 0.0f)
 {
     level.fill (-90.0f);
+    peakHoldDb.fill (-90.0f);
 
     std::vector<float> ones ((size_t) kFFTSize, 1.0f);
     window.multiplyWithWindowingTable (ones.data(), (size_t) kFFTSize);
@@ -148,9 +149,6 @@ void ClarityAudioProcessorEditor::calibrateBands (double sampleRate)
     const double edge = std::pow (2.0, 1.0 / 6.0);
     const double norm = 2.0 / (double) windowSum;
 
-    // Calibrate every 1/3-octave band with a synthetic 0 dBFS-peak sine at its centre.
-    // This captures finite FFT/bin and window effects per sample rate, rather than
-    // applying an assumed high-frequency offset to the whole spectrum.
     for (int i = 0; i < kNumBars; ++i)
     {
         const double fc = (double) barFreq (i);
@@ -179,7 +177,7 @@ void ClarityAudioProcessorEditor::calibrateBands (double sampleRate)
                 const double amplitude = (double) fftData[(size_t) bin] * norm;
                 power += amplitude * amplitude;
             }
-            power /= 1.5; // Hann-window equivalent noise bandwidth normalization
+            power /= 1.5;
         }
         else
         {
@@ -244,6 +242,9 @@ void ClarityAudioProcessorEditor::analyse()
         float& d = level[(size_t) i];
         d = (db > d) ? d + (db - d) * kAttack
                      : juce::jmax (db, d - kReleaseDbPF);
+
+        float& held = peakHoldDb[(size_t) i];
+        held = db > held ? db : juce::jmax (db, held - 0.22f);
     }
 }
 
@@ -277,16 +278,20 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     for (int i = 0; i < kNumBars; ++i)
     {
         const float dB = juce::jlimit (kDbMin, 0.0f, level[(size_t) i]);
-        const float y = kY0 + (-dB) / (-kDbMin) * (kY1 - kY0);
-        const float h = juce::jmax (0.0f, kY1 - y);
-        const float x = kPX + (float) i * kBW + 2.0f;
+        const float y  = kY0 + (-dB) / (-kDbMin) * (kY1 - kY0);
+        const float h  = juce::jmax (0.0f, kY1 - y);
+        const float x  = kPX + (float) i * kBW + 2.0f;
 
         g.setColour (zoneColour (barFreq (i)).withAlpha (0.9f));
         g.fillRect (x, y, kBW - 4.0f, h);
-        if (h > 3.0f)
+
+        // Separate slowly-falling peak cap, like the reference spectrum analyzer.
+        const float heldDb = juce::jlimit (kDbMin, 0.0f, peakHoldDb[(size_t) i]);
+        const float heldY = kY0 + (-heldDb) / (-kDbMin) * (kY1 - kY0);
+        if (peakHoldDb[(size_t) i] > kDbMin && heldY + 2.0f < kY1)
         {
-            g.setColour (white.withAlpha (0.7f));
-            g.fillRect (x, y, kBW - 4.0f, 2.0f);
+            g.setColour (juce::Colour (0xffc7cbd3).withAlpha (0.9f));
+            g.fillRect (x, heldY, kBW - 4.0f, 2.0f);
         }
     }
 

@@ -41,6 +41,7 @@ private:
     double calibratedSampleRate = 0.0;
 
     std::array<float, clarity::ui::kNumBars> level {};
+    std::array<float, clarity::ui::kNumBars> peakHoldDb {};
 
     juce::Font titleFont, subFont, axisFont;
     juce::Image logo;

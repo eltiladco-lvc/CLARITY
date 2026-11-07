@@ -30,6 +30,7 @@ private:
     std::array<float, 4> vuTpDb { -60.0f, -60.0f, -60.0f, -60.0f };
     std::vector<juce::Point<float>> pts, prevPts;
     float corr = 0.0f, peakHold = 0.0f;
+    float outputPeakDbTp = -180.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StereoPanel)
 };
