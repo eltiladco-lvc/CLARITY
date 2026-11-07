@@ -23,9 +23,10 @@ public:
 private:
     void timerCallback() override;
     void analyse();
+    void calibrateBands (double sampleRate);
     void setStereoOpen (bool open);
 
-    static constexpr int kFFTOrder = 13;
+    static constexpr int kFFTOrder = 15;
     static constexpr int kFFTSize  = 1 << kFFTOrder;
 
     ClarityAudioProcessor& processor;
@@ -36,6 +37,8 @@ private:
                                                  juce::dsp::WindowingFunction<float>::hann };
     std::vector<float> fftData;
     float windowSum = 1.0f;
+    std::array<float, clarity::ui::kNumBars> bandCalibrationDb {};
+    double calibratedSampleRate = 0.0;
 
     std::array<float, clarity::ui::kNumBars> level {};
 
