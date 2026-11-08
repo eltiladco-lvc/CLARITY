@@ -3,7 +3,7 @@
 #include <array>
 #include <atomic>
 
-//  CLARITY: analizador de espectro + CampoStereo. El audio pasa SIN modificarse.
+// CLARITY: spectrum analyser + CampoStereo. Audio always passes through unchanged.
 class ClarityAudioProcessor : public juce::AudioProcessor
 {
 public:
@@ -19,7 +19,7 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return "CLARITY"; }
-    bool acceptsMidi() const override  { return false; }
+    bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -32,28 +32,31 @@ public:
 
     void getStateInformation (juce::MemoryBlock& dest) override
     {
-        const char v[2] = { (char) uiStereoOpen, (char) uiStereoDesign };
-        dest.append (v, 2);
+        const char state[3] = { (char) uiStereoOpen, (char) uiStereoDesign, (char) uiBypass };
+        dest.append (state, sizeof (state));
     }
+
     void setStateInformation (const void* data, int size) override
     {
         if (size >= 2)
         {
-            auto* p = static_cast<const char*> (data);
-            uiStereoOpen   = p[0] != 0 ? 1 : 0;
-            uiStereoDesign = juce::jlimit (0, 2, (int) p[1]);
+            const auto* state = static_cast<const char*> (data);
+            uiStereoOpen = state[0] != 0 ? 1 : 0;
+            uiStereoDesign = juce::jlimit (0, 2, (int) state[1]);
+            uiBypass = size >= 3 && state[2] != 0 ? 1 : 0;
         }
     }
 
-    // Copia las últimas n muestras. Mono = (L+R)/2
     void copyLatest (float* mono, int n) const;
     void copyLatestStereo (float* l, float* r, int n) const;
 
-    // Estado de la interfaz (se recuerda al cerrar/abrir la ventana)
-    int uiStereoOpen = 0, uiStereoDesign = 0;
+    // UI state remembered across editor and plugin-state reloads.
+    int uiStereoOpen = 0;
+    int uiStereoDesign = 0;
+    int uiBypass = 0;
 
 private:
-    static constexpr int kRingSize = 32768;           // potencia de 2
+    static constexpr int kRingSize = 32768;
     std::array<float, kRingSize> ringL {}, ringR {};
     std::atomic<int> writePos { 0 };
 

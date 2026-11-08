@@ -5,15 +5,15 @@
 #include <vector>
 #include "UIConstants.h"
 
-// Panel "CampoStereo": 3 diseños (0 = Polar, 1 = Scope/Goniómetro, 2 = VU L/R/M/S)
 class StereoPanel : public juce::Component
 {
 public:
     StereoPanel();
 
-    void process (const float* l, const float* r, int n);   // analiza un bloque y repinta
+    void process (const float* l, const float* r, int n);
     void setDesign (int d) { design = juce::jlimit (0, 2, d); repaint(); }
-    int  getDesign() const { return design; }
+    int getDesign() const { return design; }
+    void setMonochrome (bool enabled) { monochrome = enabled; repaint(); }
     std::function<void (int)> onDesignChanged;
 
     void paint (juce::Graphics&) override;
@@ -25,12 +25,14 @@ private:
     void drawVU (juce::Graphics&);
 
     int design = 0;
+    bool monochrome = false;
     juce::Font smallFont, axisFont, bigFont;
 
     std::array<float, clarity::ui::kPolarBins> polar {};
-    std::array<float, 4> vu {};                      // L, R, M, S (1.0 = 0 VU)
-    std::vector<juce::Point<float>> pts, prevPts;    // trazo del scope (círculo unidad)
+    std::array<float, 4> vuTpDb { -60.0f, -60.0f, -60.0f, -60.0f };
+    std::vector<juce::Point<float>> pts, prevPts;
     float corr = 0.0f, peakHold = 0.0f;
+    float outputPeakDbTp = -180.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StereoPanel)
 };
