@@ -276,7 +276,10 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour (grid);
         g.drawLine (kPX, y, kRight, y, 1.0f);
         g.setColour (label);
-        drawText (g, axisFont, juce::String (d), 40.0f, y + 4.0f, Align::right);
+        const juce::String tickLabel (d);
+        drawText (g, axisFont, tickLabel, 40.0f, y + 4.0f, Align::right);
+        // Mirror the dB scale labels on the right edge of the spectrum.
+        drawText (g, axisFont, tickLabel, 678.0f, y + 4.0f, Align::right);
     }
 
     if (logo.isValid())
