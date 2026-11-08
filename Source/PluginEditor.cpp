@@ -96,6 +96,30 @@ namespace
         const double release = 1.0 - smoothStep (std::log (hz / flatEndHz) / std::log (fadeOutEndHz / flatEndHz));
         return liftDb * juce::jlimit (0.0, 1.0, attack) * juce::jlimit (0.0, 1.0, release);
     }
+
+    double lowBandReductionDb (double hz)
+    {
+        // Reduce the displayed level by 5 dB from 50 to 100 Hz, with smooth
+        // logarithmic shoulders so the neighbouring bands do not jump abruptly.
+        constexpr double fadeInStartHz = 42.0;
+        constexpr double flatStartHz = 50.0;
+        constexpr double flatEndHz = 100.0;
+        constexpr double fadeOutEndHz = 120.0;
+        constexpr double reductionDb = -5.0;
+
+        if (hz <= fadeInStartHz || hz >= fadeOutEndHz)
+            return 0.0;
+        if (hz >= flatStartHz && hz <= flatEndHz)
+            return reductionDb;
+        if (hz < flatStartHz)
+        {
+            const double t = std::log (hz / fadeInStartHz) / std::log (flatStartHz / fadeInStartHz);
+            return reductionDb * smoothStep (t);
+        }
+
+        const double t = std::log (fadeOutEndHz / hz) / std::log (fadeOutEndHz / flatEndHz);
+        return reductionDb * smoothStep (t);
+    }
 }
 
 ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor& p)
@@ -245,6 +269,7 @@ void ClarityAudioProcessorEditor::analyse()
                           + highBandCorrectionDb (fc)
                           + localPresenceLiftDb (fc)
                           + upperPresenceLiftDb (fc)
+                          + lowBandReductionDb (fc)
                           + kDisplayOffsetDb);
         }
 
@@ -273,12 +298,12 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     for (int d = 0; d >= (int) kDbMin; d -= (int) kDbStep)
     {
         const float y = kY0 + (float) (-d) / (-kDbMin) * (kY1 - kY0);
-        g.setColour (grid);
-        g.drawLine (kPX, y, kRight, y, 1.0f);
-        g.setColour (label);
+        const bool highlight = (d == -10);
+        g.setColour (highlight ? grid.brighter (0.5f) : grid);
+        g.drawLine (kPX, y, kRight, y, highlight ? 1.6f : 1.0f);
+        g.setColour (highlight ? readout : label);
         const juce::String tickLabel (d);
         drawText (g, axisFont, tickLabel, 40.0f, y + 4.0f, Align::right);
-        // Mirror the dB scale labels on the right edge of the spectrum.
         drawText (g, axisFont, tickLabel, 678.0f, y + 4.0f, Align::right);
     }
 
