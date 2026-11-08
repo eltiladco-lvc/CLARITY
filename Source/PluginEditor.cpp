@@ -171,6 +171,42 @@ ClarityAudioProcessorEditor::~ClarityAudioProcessorEditor()
 void ClarityAudioProcessorEditor::timerCallback()
 {
     analyse();
+
+    // Hold the peak only for the currently hovered band. This state is used
+    // solely by the numeric readout and does not alter the spectrum bars.
+    if (hover)
+    {
+        const int bar = juce::jlimit (0, kNumBars - 1,
+                                      (int) std::floor ((hoverX - kPX) / kBW));
+        const float bandDb = level[(size_t) bar];
+        if (bar != hoverReadoutBar)
+        {
+            hoverReadoutBar = bar;
+            hoverReadoutDb = bandDb;
+            hoverReadoutHoldTicks = 150; // hold the local peak for 2.5 seconds
+        }
+        else if (bandDb >= hoverReadoutDb)
+        {
+            hoverReadoutDb = bandDb;
+            hoverReadoutHoldTicks = 150;
+        }
+        else if (hoverReadoutHoldTicks > 0)
+        {
+            --hoverReadoutHoldTicks;
+        }
+        else
+        {
+            // Slow readout-only fall: 6 dB/second at the 60 Hz timer rate.
+            hoverReadoutDb = juce::jmax (bandDb, hoverReadoutDb - 0.1f);
+        }
+    }
+    else
+    {
+        hoverReadoutBar = -1;
+        hoverReadoutDb = -90.0f;
+        hoverReadoutHoldTicks = 0;
+    }
+
     const float sc = (float) getWidth() / kW;
     repaint (0, 0, getWidth(), juce::roundToInt (kHClosed * sc));
 
@@ -373,8 +409,7 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
         const float x = juce::jlimit (kPX, kRight, hoverX);
         const float hz = juce::jlimit (20.0f, 20000.0f, xToFreq (x));
         const int bar = juce::jlimit (0, kNumBars - 1, (int) std::floor ((x - kPX) / kBW));
-        const float db = kHoverShowsBarLevel ? level[(size_t) bar]
-            : (juce::jlimit (kY0, kY1, hoverY) - kY0) / (kY1 - kY0) * kDbMin;
+        const float db = (bar == hoverReadoutBar) ? hoverReadoutDb : level[(size_t) bar];
 
         g.setColour (white.withAlpha (0.25f));
         g.drawLine (x, kY0, x, kY1, 1.0f);
