@@ -6,11 +6,11 @@ namespace clarity::ui
     constexpr float kW = 680.0f;
     constexpr float kH = 204.0f;
     constexpr float kPX = 46.0f;
-    constexpr float kBW = 20.0f;
     constexpr float kRight = 664.0f;
+    constexpr int kNumBars = 62;
+    constexpr float kBW = (kRight - kPX) / (float) kNumBars;
     constexpr float kY0 = 52.0f;
     constexpr float kY1 = 178.0f;
-    constexpr int kNumBars = 31;
     constexpr float kDbMin = -40.0f;
     constexpr float kDbStep = 5.0f;
     constexpr float kDisplayOffsetDb = 0.0f;
@@ -22,8 +22,8 @@ namespace clarity::ui
     constexpr int kPolarBins = 60;
     constexpr float kPolarRangeDb = 50.0f;
     constexpr float kVuRefDbFS = -18.0f;
-    constexpr float kLowZoneHz = 123.0f;
-    constexpr float kHighZoneHz = 4500.0f;
+    constexpr float kLowZoneHz = 120.0f;
+    constexpr float kHighZoneHz = 4000.0f;
     constexpr bool kHoverShowsBarLevel = true;
 
     // More responsive spectrum ballistics at the 60 Hz UI refresh rate.
