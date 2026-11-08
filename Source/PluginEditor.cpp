@@ -68,13 +68,27 @@ namespace
 
     double localPresenceLiftDb (double hz)
     {
-        // Add +3 dB over 1.0-1.3 kHz, with short smooth shoulders to avoid
-        // abrupt steps in adjacent 1/3-octave bands.
         constexpr double fadeInStartHz = 900.0;
         constexpr double flatStartHz = 1000.0;
         constexpr double flatEndHz = 1300.0;
         constexpr double fadeOutEndHz = 1450.0;
         constexpr double liftDb = 3.0;
+
+        if (hz <= fadeInStartHz || hz >= fadeOutEndHz)
+            return 0.0;
+        const double attack = smoothStep (std::log (hz / fadeInStartHz) / std::log (flatStartHz / fadeInStartHz));
+        const double release = 1.0 - smoothStep (std::log (hz / flatEndHz) / std::log (fadeOutEndHz / flatEndHz));
+        return liftDb * juce::jlimit (0.0, 1.0, attack) * juce::jlimit (0.0, 1.0, release);
+    }
+
+    double upperPresenceLiftDb (double hz)
+    {
+        // Smooth +2 dB plateau from 9.5 to 10.2 kHz with quarter-octave shoulders.
+        constexpr double fadeInStartHz = 8700.0;
+        constexpr double flatStartHz = 9500.0;
+        constexpr double flatEndHz = 10200.0;
+        constexpr double fadeOutEndHz = 11700.0;
+        constexpr double liftDb = 2.0;
 
         if (hz <= fadeInStartHz || hz >= fadeOutEndHz)
             return 0.0;
@@ -182,36 +196,25 @@ void ClarityAudioProcessorEditor::analyse()
     const double norm  = 2.0 / (double) windowSum;
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
-    // Existing calibration: +5 dB from 55-900 Hz and +10 dB from 1-2 kHz,
-    // held above 2 kHz. Add another smooth +3 dB plateau from 1-1.3 kHz.
     const auto midCorrectionDb = [] (double hz)
     {
-        constexpr double fadeInHz = 43.0;
-        constexpr double fullGainStartHz = 55.0;
-        constexpr double fullGainEndHz = 900.0;
-        constexpr double fadeOutHz = 1100.0;
+        constexpr double fadeInHz = 43.0, fullStartHz = 55.0, fullEndHz = 900.0, fadeOutHz = 1100.0;
         constexpr double gainDb = 5.0;
-
-        if (hz < fadeInHz || hz >= fadeOutHz)
-            return 0.0;
-        if (hz >= fullGainStartHz && hz <= fullGainEndHz)
-            return gainDb;
-        if (hz < fullGainStartHz)
-            return gainDb * smoothStep (std::log (hz / fadeInHz) / std::log (fullGainStartHz / fadeInHz));
-        return gainDb * smoothStep (std::log (fadeOutHz / hz) / std::log (fadeOutHz / fullGainEndHz));
+        if (hz < fadeInHz || hz >= fadeOutHz) return 0.0;
+        if (hz >= fullStartHz && hz <= fullEndHz) return gainDb;
+        if (hz < fullStartHz)
+            return gainDb * smoothStep (std::log (hz / fadeInHz) / std::log (fullStartHz / fadeInHz));
+        return gainDb * smoothStep (std::log (fadeOutHz / hz) / std::log (fadeOutHz / fullEndHz));
     };
 
     const auto highBandCorrectionDb = [] (double hz)
     {
-        constexpr double startHz = 1000.0;
-        constexpr double fullCorrectionHz = 2000.0;
-        constexpr double correctionDb = 10.0;
-        return logRamp (hz, startHz, fullCorrectionHz, correctionDb);
+        return logRamp (hz, 1000.0, 2000.0, 10.0);
     };
 
     for (int i = 0; i < kNumBars; ++i)
     {
-        const double fc  = (double) barFreq (i);
+        const double fc = (double) barFreq (i);
         const double bLo = (fc / edge) / binHz;
         const double bHi = (fc * edge) / binHz;
         float db = -100.0f;
@@ -221,27 +224,27 @@ void ClarityAudioProcessorEditor::analyse()
             const int b0 = juce::jlimit (0, maxBin, (int) std::ceil (bLo));
             const int b1 = juce::jlimit (0, maxBin, (int) std::floor (bHi));
             double power = 0.0;
-
             if (b1 >= b0)
             {
                 for (int b = b0; b <= b1; ++b)
                 {
-                    const double amplitude = (double) fftData[(size_t) b] * norm;
-                    power += amplitude * amplitude;
+                    const double a = (double) fftData[(size_t) b] * norm;
+                    power += a * a;
                 }
-                power /= 1.5; // Hann window ENBW normalization
+                power /= 1.5;
             }
             else
             {
                 const int b = juce::jlimit (0, maxBin, (int) std::lround (0.5 * (bLo + bHi)));
-                const double amplitude = (double) fftData[(size_t) b] * norm;
-                power = amplitude * amplitude;
+                const double a = (double) fftData[(size_t) b] * norm;
+                power = a * a;
             }
 
             db = (float) (10.0 * std::log10 (power + 1.0e-12)
                           + midCorrectionDb (fc)
                           + highBandCorrectionDb (fc)
                           + localPresenceLiftDb (fc)
+                          + upperPresenceLiftDb (fc)
                           + kDisplayOffsetDb);
         }
 
@@ -287,10 +290,9 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     for (int i = 0; i < kNumBars; ++i)
     {
         const float dB = juce::jlimit (kDbMin, 0.0f, level[(size_t) i]);
-        const float y  = kY0 + (-dB) / (-kDbMin) * (kY1 - kY0);
-        const float h  = juce::jmax (0.0f, kY1 - y);
-        const float x  = kPX + (float) i * kBW + 2.0f;
-
+        const float y = kY0 + (-dB) / (-kDbMin) * (kY1 - kY0);
+        const float h = juce::jmax (0.0f, kY1 - y);
+        const float x = kPX + (float) i * kBW + 2.0f;
         g.setColour (zoneColour (barFreq (i)).withAlpha (0.9f));
         g.fillRect (x, y, kBW - 4.0f, h);
 
@@ -340,22 +342,19 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
 
     if (hover)
     {
-        const float x   = juce::jlimit (kPX, kRight, hoverX);
-        const float hz  = juce::jlimit (20.0f, 20000.0f, xToFreq (x));
-        const int   bar = juce::jlimit (0, kNumBars - 1, (int) std::floor ((x - kPX) / kBW));
-        const float db  = kHoverShowsBarLevel
-                            ? level[(size_t) bar]
-                            : (juce::jlimit (kY0, kY1, hoverY) - kY0) / (kY1 - kY0) * kDbMin;
+        const float x = juce::jlimit (kPX, kRight, hoverX);
+        const float hz = juce::jlimit (20.0f, 20000.0f, xToFreq (x));
+        const int bar = juce::jlimit (0, kNumBars - 1, (int) std::floor ((x - kPX) / kBW));
+        const float db = kHoverShowsBarLevel ? level[(size_t) bar]
+            : (juce::jlimit (kY0, kY1, hoverY) - kY0) / (kY1 - kY0) * kDbMin;
 
         g.setColour (white.withAlpha (0.25f));
         g.drawLine (x, kY0, x, kY1, 1.0f);
-
         const float w = 118.0f, h = 18.0f, bx = kRight - w - 2.0f, by = 52.0f;
         g.setColour (bg.withAlpha (0.85f));
         g.fillRoundedRectangle (bx, by, w, h, 4.0f);
         g.setColour (border);
         g.drawRoundedRectangle (bx, by, w, h, 4.0f, 1.0f);
-
         const juce::String dbTxt = db <= -80.0f ? juce::String ("-inf") : juce::String (db, 1);
         g.setColour (readout);
         drawText (g, axisFont, juce::String (juce::roundToInt (hz)) + " Hz, " + dbTxt + " dB",
@@ -368,8 +367,8 @@ void ClarityAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
     const float s = (float) getWidth() / kW;
     hoverX = e.position.x / s;
     hoverY = e.position.y / s;
-    hover  = hoverX >= kPX && hoverX <= kRight && hoverY >= 46.0f && hoverY <= 196.0f;
+    hover = hoverX >= kPX && hoverX <= kRight && hoverY >= 46.0f && hoverY <= 196.0f;
 }
-
 void ClarityAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e) { mouseMove (e); }
-void ClarityAudioProcessorEditor::mouseExit (const juce::MouseEvent&)   { hover = false; }
+void ClarityAudioProcessorEditor::mouseExit (const juce::MouseEvent&) { hover = false; }
+````
