@@ -45,6 +45,9 @@ private:
     juce::Image logo;
     bool  hover  = false;
     float hoverX = 0.0f, hoverY = 0.0f;
+    // Separate held dB value for the hover readout; does not affect the bars.
+    int hoverReadoutBar = -1;
+    float hoverReadoutDb = -90.0f;
 
     StereoPanel panel;
     bool stereoOpen = false;
