@@ -65,6 +65,23 @@ namespace
         const double t = std::log (hz / startHz) / std::log (endHz / startHz);
         return maxDb * smoothStep (t);
     }
+
+    double localPresenceLiftDb (double hz)
+    {
+        // Add +3 dB over 1.0-1.3 kHz, with short smooth shoulders to avoid
+        // abrupt steps in adjacent 1/3-octave bands.
+        constexpr double fadeInStartHz = 900.0;
+        constexpr double flatStartHz = 1000.0;
+        constexpr double flatEndHz = 1300.0;
+        constexpr double fadeOutEndHz = 1450.0;
+        constexpr double liftDb = 3.0;
+
+        if (hz <= fadeInStartHz || hz >= fadeOutEndHz)
+            return 0.0;
+        const double attack = smoothStep (std::log (hz / fadeInStartHz) / std::log (flatStartHz / fadeInStartHz));
+        const double release = 1.0 - smoothStep (std::log (hz / flatEndHz) / std::log (fadeOutEndHz / flatEndHz));
+        return liftDb * juce::jlimit (0.0, 1.0, attack) * juce::jlimit (0.0, 1.0, release);
+    }
 }
 
 ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor& p)
@@ -165,8 +182,8 @@ void ClarityAudioProcessorEditor::analyse()
     const double norm  = 2.0 / (double) windowSum;
     const double edge  = std::pow (2.0, 1.0 / 6.0);
 
-    // Requested calibration ramps: +5 dB across 55-900 Hz, then +10 dB
-    // across 1-2 kHz, held through 20 kHz. Smooth overlaps avoid jumps at joins.
+    // Existing calibration: +5 dB from 55-900 Hz and +10 dB from 1-2 kHz,
+    // held above 2 kHz. Add another smooth +3 dB plateau from 1-1.3 kHz.
     const auto midCorrectionDb = [] (double hz)
     {
         constexpr double fadeInHz = 43.0;
@@ -224,6 +241,7 @@ void ClarityAudioProcessorEditor::analyse()
             db = (float) (10.0 * std::log10 (power + 1.0e-12)
                           + midCorrectionDb (fc)
                           + highBandCorrectionDb (fc)
+                          + localPresenceLiftDb (fc)
                           + kDisplayOffsetDb);
         }
 
