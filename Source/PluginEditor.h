@@ -25,7 +25,6 @@ private:
     void analyse();
     void setStereoOpen (bool open);
 
-    // Match the previous plugin's spectrum analyser FFT configuration.
     static constexpr int kFFTOrder = 13;
     static constexpr int kFFTSize  = 1 << kFFTOrder;
 
@@ -43,12 +42,12 @@ private:
 
     juce::Font titleFont, subFont, axisFont;
     juce::Image logo;
-    bool  hover  = false;
+    bool hover = false;
     float hoverX = 0.0f, hoverY = 0.0f;
-    // Separate held dB readout state; does not affect the spectrum bars.
     int hoverReadoutBar = -1;
     float hoverReadoutDb = -90.0f;
     int hoverReadoutHoldTicks = 0;
+    bool monochromeBars = false;
 
     StereoPanel panel;
     bool stereoOpen = false;

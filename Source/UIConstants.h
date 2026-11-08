@@ -26,9 +26,6 @@ namespace clarity::ui
     constexpr float kHighZoneHz = 4000.0f;
     constexpr bool kHoverShowsBarLevel = true;
 
-    // More responsive spectrum ballistics at the 60 Hz UI refresh rate.
-    // Fast attack follows transients; a controlled release avoids sluggish bars,
-    // while the peak cap decays more slowly, similar to a spectrum monitor.
     constexpr float kAttack = 0.88f;
     constexpr float kReleaseDbPF = 0.55f;
     constexpr float kPeakHoldReleaseDbPF = 0.30f;
