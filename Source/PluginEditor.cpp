@@ -371,4 +371,3 @@ void ClarityAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
 }
 void ClarityAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e) { mouseMove (e); }
 void ClarityAudioProcessorEditor::mouseExit (const juce::MouseEvent&) { hover = false; }
-````
