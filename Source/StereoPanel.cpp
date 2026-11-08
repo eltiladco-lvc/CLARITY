@@ -49,8 +49,6 @@ namespace
         {
             peak = juce::jmax (peak, std::abs (at (i)));
             const float p0 = at (i - 1), p1 = at (i), p2 = at (i + 1), p3 = at (i + 2);
-
-            // Four-times cubic Lagrange interpolation estimates inter-sample peaks.
             for (int phase = 1; phase < 4; ++phase)
             {
                 const float t = (float) phase * 0.25f;
@@ -69,8 +67,8 @@ StereoPanel::StereoPanel()
 {
     const auto base = juce::Font (juce::FontOptions ("Segoe UI", 11.0f, juce::Font::plain));
     smallFont = base.withPointHeight (9.0f);
-    axisFont  = base.withPointHeight (11.0f);
-    bigFont   = base.withPointHeight (16.0f).boldened();
+    axisFont = base.withPointHeight (11.0f);
+    bigFont = base.withPointHeight (16.0f).boldened();
     pts.reserve (kStereoBlock);
     prevPts.reserve (kStereoBlock);
 }
@@ -82,7 +80,6 @@ void StereoPanel::process (const float* l, const float* r, int n)
     double sl = 0, sr = 0, lr = 0;
     float pk = 0.0f;
     std::array<float, kPolarBins> acc {};
-
     prevPts.swap (pts);
     pts.clear();
 
@@ -92,11 +89,9 @@ void StereoPanel::process (const float* l, const float* r, int n)
         const float m = 0.5f * (a + b), s = 0.5f * (a - b);
         sl += (double) a * a; sr += (double) b * b; lr += (double) a * b;
         pk = juce::jmax (pk, std::abs (a), std::abs (b));
-
         const int bin = juce::jmin (kPolarBins - 1,
                                     (int) std::floor (std::atan2 (std::abs (b), std::abs (a)) * 2.0f / kPi * (float) kPolarBins));
         acc[(size_t) bin] += 0.5f * (a * a + b * b);
-
         const float x = -s, y = m, mag = std::hypot (x, y);
         const float f = mag > 1.0e-6f ? std::pow (mag, 0.6f) / mag : 0.0f;
         pts.push_back ({ x * f, y * f });
@@ -117,10 +112,7 @@ void StereoPanel::process (const float* l, const float* r, int n)
     }
 
     const float outputDb = amplitudeToDbTp (juce::jmax (tp[0], tp[1]));
-    outputPeakDbTp = outputDb > outputPeakDbTp
-                       ? outputDb
-                       : juce::jmax (outputDb, outputPeakDbTp - 0.25f);
-
+    outputPeakDbTp = outputDb > outputPeakDbTp ? outputDb : juce::jmax (outputDb, outputPeakDbTp - 0.25f);
     const float c = (sl + sr < 1.0e-10) ? 0.0f : (float) (lr / (std::sqrt (sl * sr) + 1.0e-12));
     corr += (c - corr) * 0.15f;
     peakHold = juce::jmax (pk, peakHold * 0.95f);
@@ -155,7 +147,6 @@ void StereoPanel::mouseDown (const juce::MouseEvent& e)
 void StereoPanel::paint (juce::Graphics& g)
 {
     g.addTransform (juce::AffineTransform::scale ((float) getWidth() / kW));
-
     g.setColour (bg);
     g.fillRoundedRectangle (10.0f, 32.0f, 660.0f, 168.0f, 6.0f);
     g.setColour (border);
@@ -174,14 +165,15 @@ void StereoPanel::paint (juce::Graphics& g)
         drawTxt (g, axisFont, names[i], r.getCentreX(), r.getY() + 13.0f, 1);
     }
 
-    if (design == 0)      drawPolar (g);
+    if (design == 0) drawPolar (g);
     else if (design == 1) drawScope (g);
-    else                  drawVU (g);
+    else drawVU (g);
 }
 
 void StereoPanel::drawPolar (juce::Graphics& g)
 {
     const float cx = 340.0f, by = 192.0f, R = 140.0f;
+    const auto signalColour = monochrome ? white : high;
 
     juce::Path disc;
     disc.startNewSubPath (cx - R, by);
@@ -214,9 +206,9 @@ void StereoPanel::drawPolar (juce::Graphics& g)
         p.lineTo (cx - std::cos (a) * v * R, by - std::sin (a) * v * R);
     }
     p.closeSubPath();
-    g.setColour (high.withAlpha (0.22f));
+    g.setColour (signalColour.withAlpha (0.22f));
     g.fillPath (p);
-    g.setColour (high);
+    g.setColour (signalColour);
     g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved));
 
     g.setColour (label);
@@ -224,11 +216,12 @@ void StereoPanel::drawPolar (juce::Graphics& g)
     drawTxt (g, axisFont, "R", cx + R + 14.0f, by - 2.0f, 1);
 }
 
-// Keep the stereo vectorscope trace and add the segmented output true-peak meter below it.
 void StereoPanel::drawScope (juce::Graphics& g)
 {
     const float cx = 340.0f, cy = 93.0f, r = 51.0f;
     const juce::Rectangle<float> box (250.0f, 34.0f, 180.0f, 128.0f);
+    const auto traceColour = monochrome ? white : mid;
+    const auto persistenceColour = monochrome ? white : low;
 
     g.setColour (dark);
     g.fillRoundedRectangle (box, 6.0f);
@@ -236,12 +229,12 @@ void StereoPanel::drawScope (juce::Graphics& g)
     g.drawRoundedRectangle (box, 6.0f, 2.0f);
 
     const float dash[] = { 3.0f, 4.0f };
-    g.setColour (low.withAlpha (0.28f));
+    g.setColour (persistenceColour.withAlpha (0.28f));
     for (int k = 0; k < 16; ++k)
     {
         const float a = (float) k * kPi / 8.0f;
         g.drawDashedLine ({ cx + std::cos (a) * 12.0f, cy + std::sin (a) * 12.0f,
-                            cx + std::cos (a) * r,      cy + std::sin (a) * r }, dash, 2, 1.0f);
+                            cx + std::cos (a) * r, cy + std::sin (a) * r }, dash, 2, 1.0f);
     }
 
     auto trace = [&] (const std::vector<juce::Point<float>>& v)
@@ -256,10 +249,9 @@ void StereoPanel::drawScope (juce::Graphics& g)
         return p;
     };
 
-    // Prior trace is subtle persistence; current trace uses the plugin's mint accent.
-    g.setColour (low.withAlpha (0.24f));
+    g.setColour (persistenceColour.withAlpha (0.24f));
     g.strokePath (trace (prevPts), juce::PathStrokeType (1.0f));
-    g.setColour (mid.withAlpha (0.9f));
+    g.setColour (traceColour.withAlpha (0.9f));
     g.strokePath (trace (pts), juce::PathStrokeType (1.0f));
 
     const float meterX = 88.0f, meterY = 178.0f, meterW = 486.0f, meterH = 10.0f;
@@ -271,12 +263,11 @@ void StereoPanel::drawScope (juce::Graphics& g)
 
     g.setColour (label);
     drawTxt (g, smallFont, "OUTPUT", 20.0f, meterY + 9.0f, 0);
-
     for (int i = 0; i < segments; ++i)
     {
         const float x = meterX + (float) i * (segmentW + gap);
         const float fraction = juce::jlimit (0.0f, 1.0f, fill * (float) segments - (float) i);
-        const juce::Colour colour = palette[juce::jmin (3, i / (segments / 4))];
+        const juce::Colour colour = monochrome ? white : palette[juce::jmin (3, i / (segments / 4))];
         g.setColour (faceTop);
         g.fillRect (x, meterY, segmentW, meterH);
         if (fraction > 0.0f)
@@ -294,21 +285,21 @@ void StereoPanel::drawScope (juce::Graphics& g)
 void StereoPanel::drawVU (juce::Graphics& g)
 {
     const char* names[4] = { "L", "R", "M", "S" };
-    const juce::Colour cols[4] = { low, blue, mid, high };
+    const juce::Colour originalCols[4] = { low, blue, mid, high };
     const float Rs = 92.0f;
+    const auto overloadColour = monochrome ? white : high;
 
     for (int i = 0; i < 4; ++i)
     {
+        const auto needleColour = monochrome ? white : originalCols[i];
         const juce::Rectangle<float> cell (15.0f + (float) i * 164.0f, 36.0f, 158.0f, 160.0f);
         juce::Graphics::ScopedSaveState sss (g);
         g.reduceClipRegion (cell.toNearestInt());
 
-        g.setGradientFill (juce::ColourGradient (faceTop, cell.getX(), cell.getY(),
-                                                 bg, cell.getX(), cell.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (faceTop, cell.getX(), cell.getY(), bg, cell.getX(), cell.getBottom(), false));
         g.fillRoundedRectangle (cell, 6.0f);
         g.setColour (border);
         g.drawRoundedRectangle (cell, 6.0f, 2.0f);
-
         const float px = cell.getCentreX(), py = cell.getBottom() + 9.0f;
 
         juce::Path a1, a2;
@@ -316,7 +307,7 @@ void StereoPanel::drawVU (juce::Graphics& g)
         a2.addCentredArc (px, py, Rs, Rs, 0.0f, tickAngle (0.0f), tickAngle (3.0f), true);
         g.setColour (label.withAlpha (0.8f));
         g.strokePath (a1, juce::PathStrokeType (1.2f));
-        g.setColour (high);
+        g.setColour (overloadColour);
         g.strokePath (a2, juce::PathStrokeType (3.0f));
 
         for (float v : { -20.0f, -10.0f, -7.0f, -5.0f, -3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f })
@@ -324,19 +315,18 @@ void StereoPanel::drawVU (juce::Graphics& g)
             const float a = tickAngle (v);
             const auto t0 = pol (px, py, a, Rs - 5.0f), t1 = pol (px, py, a, Rs);
             const auto lp = pol (px, py, a, Rs + 10.0f);
-            g.setColour (v > 0.0f ? high : label);
+            g.setColour (v > 0.0f ? overloadColour : label);
             g.drawLine (t0.x, t0.y, t1.x, t1.y, 1.2f);
             drawTxt (g, smallFont, juce::String ((int) v), lp.x, lp.y + 3.0f, 1);
         }
 
         const float a = vuAngleDb (vuTpDb[(size_t) i]);
         const auto tip = pol (px, py, a, Rs + 8.0f);
-        g.setColour (cols[i].withAlpha (0.25f));
+        g.setColour (needleColour.withAlpha (0.25f));
         g.drawLine (px, py, tip.x, tip.y, 4.0f);
-        g.setColour (cols[i]);
+        g.setColour (needleColour);
         g.drawLine (px, py, tip.x, tip.y, 1.5f);
-
-        g.setColour (cols[i]);
+        g.setColour (needleColour);
         drawTxt (g, bigFont, names[i], px, cell.getBottom() - 18.0f, 1);
         g.setColour (readout);
         drawTxt (g, smallFont, juce::String (vuTpDb[(size_t) i], 1) + " dBTP", px, cell.getBottom() - 5.0f, 1);

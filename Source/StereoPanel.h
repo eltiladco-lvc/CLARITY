@@ -12,7 +12,8 @@ public:
 
     void process (const float* l, const float* r, int n);
     void setDesign (int d) { design = juce::jlimit (0, 2, d); repaint(); }
-    int  getDesign() const { return design; }
+    int getDesign() const { return design; }
+    void setMonochrome (bool enabled) { monochrome = enabled; repaint(); }
     std::function<void (int)> onDesignChanged;
 
     void paint (juce::Graphics&) override;
@@ -24,6 +25,7 @@ private:
     void drawVU (juce::Graphics&);
 
     int design = 0;
+    bool monochrome = false;
     juce::Font smallFont, axisFont, bigFont;
 
     std::array<float, clarity::ui::kPolarBins> polar {};

@@ -34,8 +34,7 @@ namespace
         return ga.getBoundingBox (0, -1, true).getWidth();
     }
 
-    void drawText (juce::Graphics& g, const juce::Font& f, const juce::String& t,
-                   float x, float baseline, Align a)
+    void drawText (juce::Graphics& g, const juce::Font& f, const juce::String& t, float x, float baseline, Align a)
     {
         const float w = textWidth (f, t);
         if (a == Align::centre) x -= w * 0.5f;
@@ -75,8 +74,7 @@ namespace
 
     int xToBar (float x)
     {
-        return juce::jlimit (0, kNumBars - 1,
-                             juce::roundToInt ((x - kPX - kBW * 0.5f) / kBW));
+        return juce::jlimit (0, kNumBars - 1, juce::roundToInt ((x - kPX - kBW * 0.5f) / kBW));
     }
 
     juce::Colour zoneColour (double hz)
@@ -87,22 +85,18 @@ namespace
     }
 
     void drawLedButton (juce::Graphics& g, const juce::Rectangle<float>& bounds,
-                        const juce::String& text, bool active, juce::Colour ledColour,
-                        const juce::Font& font)
+                        const juce::String& text, bool active, juce::Colour ledColour, const juce::Font& font)
     {
         g.setColour (active ? faceTop.brighter (0.12f) : btn);
         g.fillRoundedRectangle (bounds, 4.0f);
         g.setColour (btnLine);
         g.drawRoundedRectangle (bounds, 4.0f, 1.2f);
-
-        const float ledDiameter = 6.0f;
-        const float ledX = bounds.getX() + 7.0f;
+        const float ledDiameter = 6.0f, ledX = bounds.getX() + 7.0f;
         const float ledY = bounds.getCentreY() - ledDiameter * 0.5f;
         g.setColour (active ? ledColour : dark);
         g.fillEllipse (ledX, ledY, ledDiameter, ledDiameter);
         g.setColour (active ? ledColour.brighter (0.3f) : btnLine.brighter (0.2f));
         g.drawEllipse (ledX, ledY, ledDiameter, ledDiameter, 0.8f);
-
         g.setColour (active ? white : btnText);
         drawText (g, font, text, bounds.getCentreX() + 3.0f, bounds.getY() + 14.0f, Align::centre);
     }
@@ -133,8 +127,10 @@ namespace
 
     double upperPresenceLiftDb (double hz)
     {
-        constexpr double fadeInStartHz = 8700.0, flatStartHz = 9500.0;
-        constexpr double flatEndHz = 10200.0, fadeOutEndHz = 11700.0, liftDb = 2.0;
+        // Smooth shoulders with a +4 dB plateau from 8.7 kHz to 10.3 kHz.
+        constexpr double fadeInStartHz = 8200.0, flatStartHz = 8700.0;
+        constexpr double flatEndHz = 10300.0, fadeOutEndHz = 11800.0;
+        constexpr double liftDb = 4.0;
         if (hz <= fadeInStartHz || hz >= fadeOutEndHz) return 0.0;
         const double attack = smoothStep (std::log (hz / fadeInStartHz) / std::log (flatStartHz / fadeInStartHz));
         const double release = 1.0 - smoothStep (std::log (hz / flatEndHz) / std::log (fadeOutEndHz / flatEndHz));
@@ -173,7 +169,6 @@ ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor&
     titleFont = makeFont (titleTf, "Brush Script MT", 30.0f).withExtraKerningFactor (2.0f / 30.0f);
     subFont = makeFont (loadTypeface ("GreatVibes_ttf"), "Segoe Script", 22.0f);
     axisFont = makeFont (nullptr, "Segoe UI", 11.0f);
-
     int logoSize = 0;
     if (const char* d = BinaryData::getNamedResource ("homesounds_png", logoSize))
         logo = juce::ImageCache::getFromMemory (d, logoSize);
@@ -182,10 +177,10 @@ ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor&
     setMouseCursor (juce::MouseCursor::CrosshairCursor);
     stereoOpen = processor.uiStereoOpen != 0;
     panel.setDesign (processor.uiStereoDesign);
+    panel.setMonochrome (monochromeBars);
     panel.onDesignChanged = [this] (int d) { processor.uiStereoDesign = d; };
     addChildComponent (panel);
     panel.setVisible (stereoOpen);
-
     const float H = stereoOpen ? kHOpen : kHClosed;
     constrainer.setSizeLimits ((int) (kW * 0.5f), (int) (H * 0.5f), (int) (kW * 2.0f), (int) (H * 2.0f));
     constrainer.setFixedAspectRatio ((double) kW / (double) H);
@@ -195,16 +190,11 @@ ClarityAudioProcessorEditor::ClarityAudioProcessorEditor (ClarityAudioProcessor&
     startTimerHz (60);
 }
 
-ClarityAudioProcessorEditor::~ClarityAudioProcessorEditor()
-{
-    stopTimer();
-}
+ClarityAudioProcessorEditor::~ClarityAudioProcessorEditor() { stopTimer(); }
 
 void ClarityAudioProcessorEditor::timerCallback()
 {
-    if (processor.uiBypass == 0)
-        analyse();
-
+    if (processor.uiBypass == 0) analyse();
     if (hover && processor.uiBypass == 0)
     {
         const int bar = xToBar (hoverX);
@@ -220,10 +210,8 @@ void ClarityAudioProcessorEditor::timerCallback()
             hoverReadoutDb = bandDb;
             hoverReadoutHoldTicks = 150;
         }
-        else if (hoverReadoutHoldTicks > 0)
-            --hoverReadoutHoldTicks;
-        else
-            hoverReadoutDb = juce::jmax (bandDb, hoverReadoutDb - 0.1f);
+        else if (hoverReadoutHoldTicks > 0) --hoverReadoutHoldTicks;
+        else hoverReadoutDb = juce::jmax (bandDb, hoverReadoutDb - 0.1f);
     }
     else if (! hover)
     {
@@ -277,6 +265,7 @@ void ClarityAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     if (colourButtonBounds.contains (point))
     {
         monochromeBars = ! monochromeBars;
+        panel.setMonochrome (monochromeBars);
         repaint();
     }
 }
@@ -287,7 +276,6 @@ void ClarityAudioProcessorEditor::analyse()
     std::fill (fftData.begin() + kFFTSize, fftData.end(), 0.0f);
     window.multiplyWithWindowingTable (fftData.data(), (size_t) kFFTSize);
     fft.performFrequencyOnlyForwardTransform (fftData.data());
-
     const double sr = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 44100.0;
     const double binHz = sr / (double) kFFTSize;
     const int maxBin = kFFTSize / 2 - 1;
@@ -295,23 +283,18 @@ void ClarityAudioProcessorEditor::analyse()
 
     const auto midCorrectionDb = [] (double hz)
     {
-        constexpr double fadeInHz = 43.0, fullStartHz = 55.0, fullEndHz = 900.0, fadeOutHz = 1100.0;
-        constexpr double gainDb = 5.0;
+        constexpr double fadeInHz = 43.0, fullStartHz = 55.0, fullEndHz = 900.0, fadeOutHz = 1100.0, gainDb = 5.0;
         if (hz < fadeInHz || hz >= fadeOutHz) return 0.0;
         if (hz >= fullStartHz && hz <= fullEndHz) return gainDb;
-        if (hz < fullStartHz)
-            return gainDb * smoothStep (std::log (hz / fadeInHz) / std::log (fullStartHz / fadeInHz));
+        if (hz < fullStartHz) return gainDb * smoothStep (std::log (hz / fadeInHz) / std::log (fullStartHz / fadeInHz));
         return gainDb * smoothStep (std::log (fadeOutHz / hz) / std::log (fadeOutHz / fullEndHz));
     };
     const auto highBandCorrectionDb = [] (double hz) { return logRamp (hz, 1000.0, 2000.0, 10.0); };
 
     for (int i = 0; i < kNumBars; ++i)
     {
-        const double fc = barFreq (i);
-        const double bLo = barEdgeFreq (i) / binHz;
-        const double bHi = barEdgeFreq (i + 1) / binHz;
+        const double fc = barFreq (i), bLo = barEdgeFreq (i) / binHz, bHi = barEdgeFreq (i + 1) / binHz;
         float db = -100.0f;
-
         if (bLo <= (double) maxBin)
         {
             const int b0 = juce::jlimit (0, maxBin, (int) std::ceil (bLo));
@@ -332,17 +315,13 @@ void ClarityAudioProcessorEditor::analyse()
                 const double a = (double) fftData[(size_t) b] * norm;
                 power = a * a;
             }
-
-            db = (float) (10.0 * std::log10 (power + 1.0e-12)
-                          + midCorrectionDb (fc) + highBandCorrectionDb (fc)
-                          + localPresenceLiftDb (fc) + upperPresenceLiftDb (fc)
-                          + lowBandReductionDb (fc) + kDisplayOffsetDb);
+            db = (float) (10.0 * std::log10 (power + 1.0e-12) + midCorrectionDb (fc)
+                          + highBandCorrectionDb (fc) + localPresenceLiftDb (fc)
+                          + upperPresenceLiftDb (fc) + lowBandReductionDb (fc) + kDisplayOffsetDb);
         }
-
         float& current = level[(size_t) i];
         const float previous = current;
-        current = db >= previous ? previous + (db - previous) * kAttack
-                                 : juce::jmax (db, previous - kReleaseDbPF);
+        current = db >= previous ? previous + (db - previous) * kAttack : juce::jmax (db, previous - kReleaseDbPF);
         float& heldPeak = peakHoldDb[(size_t) i];
         heldPeak = db >= heldPeak ? db : juce::jmax (db, heldPeak - kPeakHoldReleaseDbPF);
     }
@@ -352,7 +331,6 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (bg);
     g.addTransform (juce::AffineTransform::scale ((float) getWidth() / kW));
-
     g.setColour (bg);
     g.fillRoundedRectangle (10.0f, 46.0f, 660.0f, 150.0f, 6.0f);
     g.setColour (border);
@@ -373,21 +351,18 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     if (logo.isValid())
     {
         g.setOpacity (0.45f);
-        g.drawImage (logo,
-                     juce::Rectangle<float> (kPX + (kRight - kPX - 356.0f) * 0.5f, kY0 - 4.0f, 356.0f, 126.0f),
-                     juce::RectanglePlacement::centred);
+        g.drawImage (logo, juce::Rectangle<float> (kPX + (kRight - kPX - 356.0f) * 0.5f,
+                      kY0 - 4.0f, 356.0f, 126.0f), juce::RectanglePlacement::centred);
     }
 
     for (int i = 0; i < kNumBars; ++i)
     {
         const float db = juce::jlimit (kDbMin, 0.0f, level[(size_t) i]);
         const float y = kY0 + (-db) / (-kDbMin) * (kY1 - kY0);
-        const float h = juce::jmax (0.0f, kY1 - y);
-        const float x = kPX + (float) i * kBW + 2.0f;
+        const float h = juce::jmax (0.0f, kY1 - y), x = kPX + (float) i * kBW + 2.0f;
         const auto barColour = monochromeBars ? white : zoneColour (barFreq (i));
         g.setColour (barColour.withAlpha (0.9f));
         g.fillRect (x, y, juce::jmax (1.0f, kBW - 4.0f), h);
-
         const float heldDb = juce::jlimit (kDbMin, 0.0f, peakHoldDb[(size_t) i]);
         const float heldY = kY0 + (-heldDb) / (-kDbMin) * (kY1 - kY0);
         if (peakHoldDb[(size_t) i] > kDbMin && heldY + 2.0f < kY1)
@@ -419,12 +394,10 @@ void ClarityAudioProcessorEditor::paint (juce::Graphics& g)
     }
     g.setColour (powered);
     drawText (g, subFont, kSubtitle, 664.0f, 28.0f, Align::right);
-
-    drawLedButton (g, bypassButtonBounds, "Bypass", processor.uiBypass != 0,
-                   high, axisFont);
+    drawLedButton (g, bypassButtonBounds, "Bypass", processor.uiBypass != 0, high, axisFont);
     drawLedButton (g, stereoButtonBounds, "CampoStereo", stereoOpen, mid, axisFont);
-    drawLedButton (g, colourButtonBounds, monochromeBars ? "B&W" : "RGB",
-                   monochromeBars, monochromeBars ? white : mid, axisFont);
+    drawLedButton (g, colourButtonBounds, monochromeBars ? "B&W" : "RGB", monochromeBars,
+                   monochromeBars ? white : mid, axisFont);
 
     if (hover)
     {
@@ -453,6 +426,5 @@ void ClarityAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
     hoverY = e.position.y / scale;
     hover = hoverX >= kPX && hoverX <= kRight && hoverY >= 46.0f && hoverY <= 196.0f;
 }
-
 void ClarityAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e) { mouseMove (e); }
 void ClarityAudioProcessorEditor::mouseExit (const juce::MouseEvent&) { hover = false; }
